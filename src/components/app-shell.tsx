@@ -16,6 +16,7 @@ import {
   DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const {
@@ -179,6 +180,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Input
               placeholder="Search threats, domains, IOCs…"
               className="pl-9 h-9 bg-muted/40 border-muted/40 text-sm"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const v = (e.target as HTMLInputElement).value;
+                  if (v) toast.info(`Buscando: "${v}"`, { description: 'Buscando en amenazas, dominios y IOCs…' });
+                }
+              }}
             />
             <kbd className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 h-5 px-1.5 items-center gap-0.5 rounded border border-border bg-muted text-[10px] text-muted-foreground">
               ⌘K
@@ -205,29 +212,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Badge variant="secondary" className="text-[10px]">3 new</Badge>
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="flex flex-col items-start gap-1 py-2">
+              <DropdownMenuItem className="flex flex-col items-start gap-1 py-2" onClick={() => { setModule('threats'); toast.info('Phishing Nequi', { description: 'Abriendo amenaza…' }); }}>
                 <div className="flex items-center gap-2 w-full">
                   <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
                   <span className="text-xs font-semibold text-red-400">Critical</span>
                   <span className="text-[10px] text-muted-foreground ml-auto">5m ago</span>
                 </div>
-                <p className="text-xs">Phishing kit detected on login-acme-secure.tk</p>
+                <p className="text-xs">Phishing kit detectado en login-nequi-seguro.tk</p>
               </DropdownMenuItem>
-              <DropdownMenuItem className="flex flex-col items-start gap-1 py-2">
+              <DropdownMenuItem className="flex flex-col items-start gap-1 py-2" onClick={() => { setModule('brand-protection'); toast.info('Fake App Nequi', { description: 'Abriendo Brand Protection → Fake Apps…' }); }}>
                 <div className="flex items-center gap-2 w-full">
                   <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
                   <span className="text-xs font-semibold text-orange-400">High</span>
                   <span className="text-[10px] text-muted-foreground ml-auto">1h ago</span>
                 </div>
-                <p className="text-xs">Fake "ACME Wallet" app on Google Play</p>
+                <p className="text-xs">App falsa "Nequi Bolsillos Pro" en Google Play</p>
               </DropdownMenuItem>
-              <DropdownMenuItem className="flex flex-col items-start gap-1 py-2">
+              <DropdownMenuItem className="flex flex-col items-start gap-1 py-2" onClick={() => { setModule('executive-protection'); toast.info('Leak Wenia CTO', { description: 'Credenciales del CTO de Wenia filtradas.' }); }}>
                 <div className="flex items-center gap-2 w-full">
                   <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
                   <span className="text-xs font-semibold text-red-400">Critical</span>
                   <span className="text-[10px] text-muted-foreground ml-auto">3h ago</span>
                 </div>
-                <p className="text-xs">Credentials of exec@acmebank.com leaked</p>
+                <p className="text-xs">Credenciales del CTO de Wenia filtradas en darkweb</p>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -253,8 +260,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => setModule('settings')}>Settings</DropdownMenuItem>
-              <DropdownMenuItem>API Keys</DropdownMenuItem>
-              <DropdownMenuItem>Change Password</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { setModule('settings'); toast.info('API Keys abiertas'); }}>API Keys</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => toast.info('Change Password', { description: 'Abriendo formulario…' })}>Change Password</DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={logout} className="text-red-400 focus:text-red-400">
                 <LogOut className="h-4 w-4 mr-2" /> Logout

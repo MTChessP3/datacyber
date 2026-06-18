@@ -50,8 +50,8 @@ export function ReportsModule() {
     <div>
       <ModuleHeader
         title="Reports"
-        description="Generate professional executive, technical, compliance and daily digest reports from your threat intelligence data."
-        actions={<Button size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />Create Template</Button>}
+        description="Generación de reportes ejecutivos, técnicos, de cumplimiento y resúmenes diarios con datos de las 11 marcas monitoreadas."
+        actions={<Button size="sm" onClick={() => toast.info('Nuevo template', { description: 'Definí secciones, audiencia y periodicidad.' })}><Plus className="h-3.5 w-3.5 mr-1.5" />Create Template</Button>}
       />
 
       {/* Generate report */}
@@ -112,7 +112,7 @@ export function ReportsModule() {
                       </div>
                     </div>
                     {r.status === 'ready' && (
-                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => toast.success('Descargando reporte', { description: `${r.title} (${r.size})` })}>
                         <Download className="h-4 w-4" />
                       </Button>
                     )}

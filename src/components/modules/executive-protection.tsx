@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Plus, Briefcase, Mail, Phone, KeyRound, FileText, MapPin, Shield } from 'lucide-react';
 import type { ExposureFinding } from '@/lib/types';
+import { toast } from 'sonner';
 
 const typeIcon = {
   email: Mail,
@@ -28,11 +29,11 @@ export function ExecutiveProtectionModule() {
     <div>
       <ModuleHeader
         title="Executive Protection"
-        description="Monitor digital exposure of your C-suite and key personnel across data breaches, darkweb forums, paste sites and public registries."
+        description="Monitoreo de exposición digital de ejecutivos C-level de Bancolombia, Wenia, Nequi, Wompi, Banco AgroMercantil, Banco Agrícola, Banistmo y Zaswin. Filtraciones en breaches, darkweb, paste sites y registros públicos."
         actions={
           <>
-            <Button variant="outline" size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />Add Executive Profile</Button>
-            <Button size="sm"><Shield className="h-3.5 w-3.5 mr-1.5" />Run Exposure Scan</Button>
+            <Button variant="outline" size="sm" onClick={() => toast.info('Nuevo perfil ejecutivo', { description: 'Abriendo formulario para agregar ejecutivo…' })}><Plus className="h-3.5 w-3.5 mr-1.5" />Add Executive Profile</Button>
+            <Button size="sm" onClick={() => toast.success('Exposure scan iniciado', { description: 'Revisando 9 perfiles contra 14 fuentes OSINT…' })}><Shield className="h-3.5 w-3.5 mr-1.5" />Run Exposure Scan</Button>
           </>
         }
       />

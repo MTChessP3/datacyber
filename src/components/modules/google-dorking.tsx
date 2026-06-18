@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import {
   Search, Plus, Play, Pause, ExternalLink, Code2, Database, Eye, FileSearch,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 const categoryStyles = {
   leaks:         { label: 'Leaks',         badge: 'bg-red-500/15 text-red-400 border-red-500/30', icon: Database },
@@ -30,8 +31,8 @@ export function GoogleDorkingModule() {
     <div>
       <ModuleHeader
         title="Google Dorking"
-        description="Continuous advanced search queries (Google dorks) to detect leaked credentials, exposed files, phishing templates and infrastructure weaknesses indexed by search engines."
-        actions={<Button size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />Add Dork Query</Button>}
+        description="Búsquedas avanzadas (Google dorks) para detectar credenciales filtradas, archivos expuestos, templates de phishing y debilidades de infraestructura de las 11 marcas."
+        actions={<Button size="sm" onClick={() => toast.info('Nueva query', { description: 'Definí categoría y query de Google dork.' })}><Plus className="h-3.5 w-3.5 mr-1.5" />Add Dork Query</Button>}
       />
 
       {/* New query */}
@@ -46,7 +47,7 @@ export function GoogleDorkingModule() {
               className="pl-9 h-10 font-mono text-sm"
             />
           </div>
-          <Button className="h-10 px-5">
+          <Button className="h-10 px-5" onClick={() => { if (!query) { toast.error('Ingresá una query de Google dork'); return; } toast.success('Dork ejecutado', { description: query.slice(0, 60) + '…' }); }}>
             <Play className="h-4 w-4 mr-1.5" />Run dork
           </Button>
         </div>
@@ -112,7 +113,7 @@ export function GoogleDorkingModule() {
                   <span>Last run: {formatRelative(selected.lastRun)}</span>
                   <span>·</span>
                   <span>{selected.results} results</span>
-                  <Button variant="ghost" size="sm" className="h-6 text-xs ml-auto px-2">
+                  <Button variant="ghost" size="sm" className="h-6 text-xs ml-auto px-2" onClick={() => toast.success('Re-running dork', { description: selected.query.slice(0, 60) + '…' })}>
                     <Play className="h-3 w-3 mr-1" />Re-run
                   </Button>
                 </div>

@@ -8,7 +8,8 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Plus, MessageSquare, Send, MessageCircle, Twitter, Users, AlertFlag, Flag } from 'lucide-react';
+import { Plus, MessageSquare, Send, MessageCircle, Twitter, Users, Flag } from 'lucide-react';
+import { toast } from 'sonner';
 
 const platformIcon = {
   Telegram: Send,
@@ -52,11 +53,11 @@ export function SocialMonitoringModule() {
     <div>
       <ModuleHeader
         title="Social Media Monitoring"
-        description="Surveillance of Telegram, Discord, Twitter and Reddit channels for mentions of your brand, leaked credentials, phishing kits and illicit trading of your data."
+        description="Vigilancia de canales de Telegram, Discord, Twitter y Reddit mencionando las 11 marcas. Detecta venta de creds, phishing kits, fake airdrops y menciones sospechosas."
         actions={
           <>
-            <Button variant="outline" size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />Add Channel</Button>
-            <Button size="sm"><MessageSquare className="h-3.5 w-3.5 mr-1.5" />Add Keyword</Button>
+            <Button variant="outline" size="sm" onClick={() => toast.info('Agregar canal', { description: 'Pegar ID de canal de Telegram, Discord o usuario de Twitter.' })}><Plus className="h-3.5 w-3.5 mr-1.5" />Add Channel</Button>
+            <Button size="sm" onClick={() => toast.info('Agregar keyword', { description: 'Define reglas de keyword para flaggear mensajes.' })}><MessageSquare className="h-3.5 w-3.5 mr-1.5" />Add Keyword</Button>
           </>
         }
       />
@@ -161,7 +162,7 @@ export function SocialMonitoringModule() {
           <SectionCard
             title="Flagged messages"
             description="Messages matching keyword rules — flagged for analyst review"
-            action={<Button variant="ghost" size="sm" className="text-xs">View all</Button>}
+            action={<Button variant="ghost" size="sm" className="text-xs" onClick={() => toast.info(`Mostrando todos los mensajes de "${selected.name}"`)}>View all</Button>}
           >
             <div className="space-y-2 max-h-[500px] overflow-y-auto dc-scroll">
               {messages.length === 0 ? (

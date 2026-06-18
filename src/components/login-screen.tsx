@@ -131,7 +131,7 @@ export function LoginScreen() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password" className="text-xs">Password</Label>
-                  <button type="button" className="text-xs text-primary hover:underline">
+                  <button type="button" onClick={() => toast.info('Reset de contraseña', { description: 'Se enviaría un email con instrucciones.' })} className="text-xs text-primary hover:underline">
                     Forgot password?
                   </button>
                 </div>

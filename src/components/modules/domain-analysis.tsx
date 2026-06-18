@@ -9,6 +9,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Globe, Search, Shield, Server, FileLock2, Network, CalendarDays, Building2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { toast } from 'sonner';
 
 export function DomainAnalysisModule() {
   const [selectedId, setSelectedId] = useState(domainRecords[0].id);
@@ -19,8 +20,8 @@ export function DomainAnalysisModule() {
     <div>
       <ModuleHeader
         title="Domain Analysis"
-        description="Deep DNS, WHOIS, subdomain enumeration, open port scanning and security header inspection for any domain."
-        actions={<Button size="sm"><Globe className="h-3.5 w-3.5 mr-1.5" />Scan New Domain</Button>}
+        description="Análisis profundo de DNS, WHOIS, enumeración de subdominios, escaneo de puertos y auditoría de security headers para dominios asociados a las 11 marcas."
+        actions={<Button size="sm" onClick={() => { if (!query) { toast.error('Ingresá un dominio para escanear'); return; } toast.success('Scan iniciado', { description: `Dominio: ${query}` }); }}><Globe className="h-3.5 w-3.5 mr-1.5" />Scan New Domain</Button>}
       />
 
       {/* Search */}
@@ -35,7 +36,7 @@ export function DomainAnalysisModule() {
               className="pl-9 h-10 font-mono"
             />
           </div>
-          <Button className="h-10 px-5">
+          <Button className="h-10 px-5" onClick={() => { if (!query) { toast.error('Ingresá un dominio'); return; } toast.success('Escaneo completo iniciado', { description: `Dominio: ${query} — DNS, WHOIS, puertos, headers.` }); }}>
             <Network className="h-4 w-4 mr-1.5" />Run full scan
           </Button>
         </div>

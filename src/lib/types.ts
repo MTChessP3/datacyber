@@ -192,3 +192,13 @@ export type ModuleKey =
   | 'threats'
   | 'reports'
   | 'settings';
+
+export interface Brand {
+  id: string;
+  name: string;
+  country: string;
+  type: 'Bank' | 'Fintech' | 'Services';
+  domain: string;
+  status: 'active' | 'flagged' | 'inactive';
+  findings: number;
+}

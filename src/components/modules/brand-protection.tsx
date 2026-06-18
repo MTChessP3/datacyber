@@ -2,13 +2,15 @@
 
 import { useState } from 'react';
 import { ModuleHeader, SectionCard } from '@/components/ui-blocks';
-import { brandTargets, fakeApps } from '@/lib/data';
+import { brandTargets, fakeApps, brands } from '@/lib/data';
 import { formatRelative, classNames } from '@/lib/helpers';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Plus, Shield, Smartphone, Globe, ShoppingBag, AtSign, AlertTriangle, Download } from 'lucide-react';
+import { toast } from 'sonner';
+import { useAppStore } from '@/lib/store';
 
 const typeIcon = {
   domain: Globe,
@@ -31,6 +33,7 @@ const fakeStatusStyles = {
 
 export function BrandProtectionModule() {
   const [tab, setTab] = useState('targets');
+  const setModule = useAppStore((s) => s.setModule);
 
   const totals = {
     targets: brandTargets.length,
@@ -43,14 +46,55 @@ export function BrandProtectionModule() {
     <div>
       <ModuleHeader
         title="Brand Protection"
-        description="Monitor domains, app stores, marketplaces and social media for impersonations of your brands. Detect fake apps, typosquatting and brand abuse in real time."
+        description="Monitoreo de las 11 marcas: Bancolombia, Banco AgroMercantil, Banco Agrícola, Banistmo, Nequi, Zaswin, Renting, Suvalor, Wompi y Wenia. Detecta dominios typosquat, apps falsas e impersonaciones en redes."
         actions={
           <>
-            <Button variant="outline" size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />Add Monitoring Target</Button>
-            <Button size="sm"><Shield className="h-3.5 w-3.5 mr-1.5" />Run Scan</Button>
+            <Button variant="outline" size="sm" onClick={() => toast.info('Formulario Nuevo Target', { description: 'Abriendo formulario para agregar objetivo de monitoreo…' })}><Plus className="h-3.5 w-3.5 mr-1.5" />Add Monitoring Target</Button>
+            <Button size="sm" onClick={() => toast.success('Scan iniciado', { description: 'Escaneando 24 targets en paralelo…' })}><Shield className="h-3.5 w-3.5 mr-1.5" />Run Scan</Button>
           </>
         }
       />
+
+      {/* Brands overview */}
+      <Card className="bg-card/60 mb-6">
+        <div className="px-5 pt-4 pb-3 border-b border-border">
+          <h3 className="text-sm font-semibold">Marcas monitoreadas ({brands.length})</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">Bancos en Colombia, Guatemala, El Salvador y Panamá + fintechs y servicios</p>
+        </div>
+        <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
+          {brands.map((b) => {
+            const statusBadge = b.status === 'flagged'
+              ? 'bg-red-500/15 text-red-400 border-red-500/30'
+              : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+            return (
+              <button
+                key={b.id}
+                onClick={() => toast.info(`${b.name}`, { description: `${b.country} · ${b.domain} · ${b.findings} findings` })}
+                className="text-left rounded-lg border border-border bg-muted/20 hover:border-primary/40 hover:bg-muted/40 transition p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate">{b.name}</div>
+                    <div className="text-[10px] text-muted-foreground font-mono truncate">{b.domain}</div>
+                  </div>
+                  <Badge variant="outline" className={classNames('text-[10px] shrink-0', statusBadge)}>{b.status}</Badge>
+                </div>
+                <div className="flex items-center gap-2 mt-2 text-[10px] text-muted-foreground">
+                  <span>{b.country}</span>
+                  <span>·</span>
+                  <span>{b.type}</span>
+                  {b.findings > 0 && (
+                    <>
+                      <span>·</span>
+                      <span className={b.findings >= 5 ? 'text-red-400 font-medium' : 'text-orange-400'}>{b.findings} findings</span>
+                    </>
+                  )}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {[
@@ -115,7 +159,7 @@ export function BrandProtectionModule() {
                         </td>
                         <td className="px-4 py-3 text-xs text-muted-foreground">{formatRelative(t.lastScan)}</td>
                         <td className="px-4 py-3 text-right">
-                          <Button variant="ghost" size="sm" className="h-7 text-xs">Details</Button>
+                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => toast.info(`Detalles: ${t.target}`, { description: `Estado: ${t.status} · Findings: ${t.findings}` })}>Details</Button>
                         </td>
                       </tr>
                     );
@@ -161,7 +205,7 @@ export function BrandProtectionModule() {
                           <div className="text-xs text-muted-foreground">Malicious Score</div>
                           <div className={classNames('text-lg font-bold dc-mono', scoreColor)}>{a.maliciousScore}</div>
                         </div>
-                        <Button variant="outline" size="sm" className="h-7 text-xs">Submit takedown</Button>
+                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => toast.success('Takedown enviado', { description: `Reporte DMCA / Google Play enviado para "${a.appName}".` })}>Submit takedown</Button>
                       </div>
                     </div>
                   </div>

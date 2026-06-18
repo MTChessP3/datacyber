@@ -59,7 +59,7 @@ export function SettingsModule() {
     <div>
       <ModuleHeader
         title="Settings"
-        description="Manage API integrations, notification preferences and account security."
+        description="Gestión de integraciones de API, preferencias de notificaciones y seguridad de la cuenta."
       />
 
       <Tabs value={tab} onValueChange={setTab}>
@@ -190,7 +190,7 @@ export function SettingsModule() {
                       <div className="text-sm font-medium">{n.label}</div>
                       <div className="text-[11px] text-muted-foreground">{n.desc}</div>
                     </div>
-                    <Switch defaultChecked={n.defaultOn} />
+                    <Switch defaultChecked={n.defaultOn} onCheckedChange={(v) => toast.success(`${n.label}: ${v ? 'activado' : 'desactivado'}`)} />
                   </div>
                 );
               })}
@@ -240,7 +240,7 @@ export function SettingsModule() {
                   <div className="text-sm font-medium">SMS backup</div>
                   <div className="text-[11px] text-muted-foreground">+57 ••• ••• 0142</div>
                 </div>
-                <Button variant="outline" size="sm" className="h-7 text-xs">Configure</Button>
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => toast.info('Configurar SMS backup', { description: 'Ingresá tu número para 2FA por SMS.' })}>Configure</Button>
               </div>
 
               <div className="mt-4 pt-4 border-t border-border">
@@ -258,7 +258,7 @@ export function SettingsModule() {
                       <div className="font-medium">Bogotá, CO · Safari iOS</div>
                       <div className="text-muted-foreground">181.46.x.x · 2h ago</div>
                     </div>
-                    <Button variant="ghost" size="sm" className="h-6 text-xs">Revoke</Button>
+                    <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => toast.success('Sesión revocada', { description: 'Se cerró la sesión en Safari iOS.' })}>Revoke</Button>
                   </div>
                 </div>
               </div>

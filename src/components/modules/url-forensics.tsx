@@ -14,6 +14,8 @@ import {
   ArrowRight, Lock, Server, Activity,
 } from 'lucide-react';
 
+import { toast } from 'sonner';
+
 const statusStyles = {
   completed:  { label: 'Completed',  badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
   processing: { label: 'Processing', badge: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
@@ -26,8 +28,11 @@ export function UrlForensicsModule() {
   const selected = forensicsAnalyses.find((a) => a.id === selectedId)!;
 
   function analyze() {
-    if (!url) return;
-    // Mock: select the first analysis as a "fresh" example
+    if (!url) {
+      toast.error('Ingresá una URL para analizar');
+      return;
+    }
+    toast.success('Análisis iniciado', { description: `URL: ${url.slice(0, 60)}…` });
     setSelectedId(forensicsAnalyses[0].id);
   }
 
@@ -35,8 +40,8 @@ export function UrlForensicsModule() {
     <div>
       <ModuleHeader
         title="URL Forensics"
-        description="Submit suspicious URLs for deep forensic analysis: redirect chain inspection, SSL validation, sandbox detonation and multi-engine reputation lookup."
-        actions={<Button size="sm"><ScanLine className="h-3.5 w-3.5 mr-1.5" />Bulk Submit</Button>}
+        description="Análisis forense profundo de URLs sospechosas: cadena de redirects, validación SSL, detonación en sandbox y reputación multi-engine. Detecta phishing contra las 11 marcas."
+        actions={<Button size="sm" onClick={() => toast.info('Bulk submit', { description: 'Subir lista CSV de URLs para análisis masivo.' })}><ScanLine className="h-3.5 w-3.5 mr-1.5" />Bulk Submit</Button>}
       />
 
       {/* Submission box */}

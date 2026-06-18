@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/select';
 import { AlertTriangle, Filter, Search, Download, ShieldOff } from 'lucide-react';
 import type { Severity, ThreatStatus } from '@/lib/types';
+import { toast } from 'sonner';
 
 export function ThreatsModule() {
   const [search, setSearch] = useState('');
@@ -43,11 +44,11 @@ export function ThreatsModule() {
     <div>
       <ModuleHeader
         title="Threats"
-        description="All detected threats across brand protection, executive exposure, social monitoring, URL forensics, domain analysis and dorking."
+        description="Todas las amenazas detectadas para las 11 marcas monitoreadas: phishing, brand abuse, malware, leaks, dominios y menciones sociales."
         actions={
           <>
-            <Button variant="outline" size="sm"><Filter className="h-3.5 w-3.5 mr-1.5" />Export CSV</Button>
-            <Button size="sm"><ShieldOff className="h-3.5 w-3.5 mr-1.5" />Bulk triage</Button>
+            <Button variant="outline" size="sm" onClick={() => toast.success('Exportando CSV…', { description: `${threats.length} amenazas en el export.` })}><Filter className="h-3.5 w-3.5 mr-1.5" />Export CSV</Button>
+            <Button size="sm" onClick={() => toast.info('Bulk triage', { description: 'Seleccioná amenazas con los checkboxes para triage masivo.' })}><ShieldOff className="h-3.5 w-3.5 mr-1.5" />Bulk triage</Button>
           </>
         }
       />
@@ -165,7 +166,7 @@ export function ThreatsModule() {
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{formatRelative(t.detectedAt)}</td>
                     <td className="px-4 py-3 text-right">
-                      <Button variant="ghost" size="sm" className="h-7 text-xs">Investigate</Button>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => toast.info(`Investigando: ${t.title.slice(0, 50)}…`, { description: `Confianza: ${t.confidence}% · Estado: ${t.status}` })}>Investigate</Button>
                     </td>
                   </tr>
                 );
@@ -182,7 +183,7 @@ export function ThreatsModule() {
         </div>
         <div className="px-4 py-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
           <span>Showing {filtered.length} of {threats.length} threats</span>
-          <Button variant="ghost" size="sm" className="text-xs">
+          <Button variant="ghost" size="sm" className="text-xs" onClick={() => toast.success('Descarga iniciada', { description: `CSV con ${filtered.length} amenazas.` })}>
             <Download className="h-3.5 w-3.5 mr-1" />
             Export
           </Button>
