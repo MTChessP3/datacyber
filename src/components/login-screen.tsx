@@ -20,21 +20,18 @@ export function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setLoading(true);
-    // Simulate network latency
-    setTimeout(() => {
-      const ok = login(username, password);
-      if (!ok) {
-        setError('Invalid username or password. Try the demo accounts below.');
-        toast.error('Login failed', { description: 'Invalid credentials' });
-      } else {
-        toast.success('Welcome to DataCyber', { description: `Signed in as ${username}` });
-      }
-      setLoading(false);
-    }, 500);
+    const result = await login(username, password);
+    setLoading(false);
+    if (!result.ok) {
+      setError(result.error || 'Login failed');
+      toast.error('Login failed', { description: result.error });
+    } else {
+      toast.success('Welcome to DataCyber', { description: `Signed in as ${username}` });
+    }
   }
 
   function fillDemo(u: string, p: string) {

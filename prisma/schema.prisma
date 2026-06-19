@@ -1,8 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+// DataCyber schema — SQLite + Prisma
 
 generator client {
   provider = "prisma-client-js"
@@ -14,19 +10,149 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  username     String   @unique
+  email        String   @unique
+  passwordHash String
+  role         String   @default("analyst")
+  avatar       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
-model Post {
+model Brand {
   id        String   @id @default(cuid())
-  title     String
-  content   String?
-  published Boolean  @default(false)
-  authorId  String
+  name      String
+  country   String
+  type      String
+  domain    String
+  status    String   @default("active")
+  findings  Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  threats   Threat[]
+  targets   BrandTarget[]
+}
+
+model BrandTarget {
+  id        String   @id @default(cuid())
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  type      String   // domain | appstore | marketplace | social
+  target    String
+  status    String   @default("active")
+  findings  Int      @default(0)
+  lastScan  DateTime?
+  createdAt DateTime @default(now())
+}
+
+model Threat {
+  id         String   @id @default(cuid())
+  brandId    String?
+  brand      Brand?   @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  title      String
+  source     String
+  severity   String
+  status     String   @default("new")
+  category   String
+  confidence Int      @default(0)
+  detectedAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+}
+
+model UrlScan {
+  id           String   @id @default(cuid())
+  url          String
+  submittedBy  String
+  submittedAt  DateTime @default(now())
+  status       String   @default("queued") // queued | processing | completed | failed
+  threatScore  Int      @default(0)
+  finalUrl     String?
+  ipAddress    String?
+  redirects    Int      @default(0)
+  sslValid     Boolean?
+  sslIssuer    String?
+  sslValidFrom String?
+  sslValidTo   String?
+  detections   String?  // JSON string
+  error        String?
+}
+
+model DomainScan {
+  id             String   @id @default(cuid())
+  domain         String
+  submittedBy    String
+  scannedAt      DateTime @default(now())
+  status         String   @default("queued")
+  registered     String?
+  expires        String?
+  registrar      String?
+  dnsSec         Boolean?
+  reputation     Int      @default(50)
+  openPorts      String?  // JSON
+  subdomains     String?  // JSON
+  securityHeaders String? // JSON
+  ipAddresses    String?  // JSON
+  nameServers    String?  // JSON
+  error          String?
+}
+
+model Executive {
+  id                 String   @id @default(cuid())
+  name               String
+  role               String
+  company            String
+  exposedEmails      Int      @default(0)
+  exposedPhones      Int      @default(0)
+  leakedCredentials  Int      @default(0)
+  riskScore          Int      @default(0)
+  lastCheck          DateTime @default(now())
+  createdAt          DateTime @default(now())
+}
+
+model SocialChannel {
+  id           String   @id @default(cuid())
+  platform     String
+  name         String
+  identifier   String
+  members      Int      @default(0)
+  messages     Int      @default(0)
+  alerts       Int      @default(0)
+  status       String   @default("monitoring")
+  lastActivity DateTime @default(now())
+  createdAt    DateTime @default(now())
+}
+
+model ApiKey {
+  id         String   @id @default(cuid())
+  provider   String
+  label      String
+  maskedKey  String
+  status     String   @default("unconfigured")
+  lastUsed   DateTime?
+  quotaUsed  Int?
+  quotaTotal Int?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  title       String
+  template    String
+  period      String
+  status      String   @default("processing")
+  size        String?
+  generatedAt DateTime @default(now())
+  content     String?  // JSON con datos del reporte
+  pdfBase64   String?  // PDF generado (base64)
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  type      String
+  message   String
+  severity  String
+  actor     String
+  timestamp DateTime @default(now())
 }

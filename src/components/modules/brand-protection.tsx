@@ -1,83 +1,204 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ModuleHeader, SectionCard } from '@/components/ui-blocks';
-import { brandTargets, fakeApps, brands } from '@/lib/data';
-import { formatRelative, classNames } from '@/lib/helpers';
+import { authFetch } from '@/lib/store';
+import { classNames } from '@/lib/helpers';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Plus, Shield, Smartphone, Globe, ShoppingBag, AtSign, AlertTriangle, Download } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Plus, Shield, Smartphone, Globe, ShoppingBag, AtSign, AlertTriangle, Trash2, Loader2, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useAppStore } from '@/lib/store';
 
-const typeIcon = {
-  domain: Globe,
-  appstore: Smartphone,
-  marketplace: ShoppingBag,
-  social: AtSign,
-};
+interface Brand {
+  id: string;
+  name: string;
+  country: string;
+  type: string;
+  domain: string;
+  status: string;
+  findings: number;
+}
 
-const statusStyles = {
+const typeIcon: Record<string, any> = { domain: Globe, appstore: Smartphone, marketplace: ShoppingBag, social: AtSign };
+const statusStyles: Record<string, { label: string; badge: string }> = {
   active:   { label: 'Active',   badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
-  inactive: { label: 'Inactive', badge: 'bg-slate-500/15 text-slate-400 border-slate-500/30' },
   flagged:  { label: 'Flagged',  badge: 'bg-red-500/15 text-red-400 border-red-500/30' },
-};
-
-const fakeStatusStyles = {
-  pending:  { label: 'Pending',  badge: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
-  reported: { label: 'Reported', badge: 'bg-orange-500/15 text-orange-400 border-orange-500/30' },
-  removed:  { label: 'Removed',  badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
+  inactive: { label: 'Inactive', badge: 'bg-slate-500/15 text-slate-400 border-slate-500/30' },
 };
 
 export function BrandProtectionModule() {
-  const [tab, setTab] = useState('targets');
-  const setModule = useAppStore((s) => s.setModule);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ name: '', country: 'Colombia', type: 'Bank', domain: '' });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch('/api/brands');
+      if (res.ok) setBrands(await res.json());
+    } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function addBrand() {
+    if (!form.name || !form.domain) {
+      toast.error('Name y domain son obligatorios');
+      return;
+    }
+    try {
+      const res = await authFetch('/api/brands', {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        toast.error(err.error || 'Error al agregar marca');
+        return;
+      }
+      toast.success('Marca agregada', { description: `${form.name} (${form.country})` });
+      setForm({ name: '', country: 'Colombia', type: 'Bank', domain: '' });
+      setOpen(false);
+      load();
+    } catch (e: any) {
+      toast.error('Error: ' + e.message);
+    }
+  }
+
+  async function deleteBrand(b: Brand) {
+    if (!confirm(`¿Eliminar la marca "${b.name}"? Esta acción es irreversible.`)) return;
+    try {
+      const res = await authFetch(`/api/brands/${b.id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        toast.error('Error al eliminar');
+        return;
+      }
+      toast.success('Marca eliminada', { description: b.name });
+      load();
+    } catch (e: any) {
+      toast.error('Error: ' + e.message);
+    }
+  }
 
   const totals = {
-    targets: brandTargets.length,
-    flagged: brandTargets.filter((t) => t.status === 'flagged').length,
-    fakeApps: fakeApps.length,
-    pendingApps: fakeApps.filter((a) => a.status === 'pending').length,
+    brands: brands.length,
+    flagged: brands.filter(b => b.status === 'flagged').length,
+    findings: brands.reduce((a, b) => a + b.findings, 0),
+    countries: new Set(brands.map(b => b.country)).size,
   };
 
   return (
     <div>
       <ModuleHeader
         title="Brand Protection"
-        description="Monitoreo de las 11 marcas: Bancolombia, Banco AgroMercantil, Banco Agrícola, Banistmo, Nequi, Zaswin, Renting, Suvalor, Wompi y Wenia. Detecta dominios typosquat, apps falsas e impersonaciones en redes."
+        description="Gestión REAL de marcas monitoreadas. Alta/baja persistente en base de datos. Cuando agregás o eliminás una marca, queda guardada entre sesiones."
         actions={
-          <>
-            <Button variant="outline" size="sm" onClick={() => toast.info('Formulario Nuevo Target', { description: 'Abriendo formulario para agregar objetivo de monitoreo…' })}><Plus className="h-3.5 w-3.5 mr-1.5" />Add Monitoring Target</Button>
-            <Button size="sm" onClick={() => toast.success('Scan iniciado', { description: 'Escaneando 24 targets en paralelo…' })}><Shield className="h-3.5 w-3.5 mr-1.5" />Run Scan</Button>
-          </>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />Add Brand</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Agregar marca para monitorear</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3 py-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Nombre *</Label>
+                  <Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Ej: Nequi" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">País</Label>
+                    <Select value={form.country} onValueChange={(v) => setForm({ ...form, country: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Colombia">Colombia</SelectItem>
+                        <SelectItem value="Guatemala">Guatemala</SelectItem>
+                        <SelectItem value="El Salvador">El Salvador</SelectItem>
+                        <SelectItem value="Panamá">Panamá</SelectItem>
+                        <SelectItem value="México">México</SelectItem>
+                        <SelectItem value="Argentina">Argentina</SelectItem>
+                        <SelectItem value="Brasil">Brasil</SelectItem>
+                        <SelectItem value="Perú">Perú</SelectItem>
+                        <SelectItem value="Chile">Chile</SelectItem>
+                        <SelectItem value="Ecuador">Ecuador</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Tipo</Label>
+                    <Select value={form.type} onValueChange={(v) => setForm({ ...form, type: v })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Bank">Bank</SelectItem>
+                        <SelectItem value="Fintech">Fintech</SelectItem>
+                        <SelectItem value="Services">Services</SelectItem>
+                        <SelectItem value="Crypto">Crypto</SelectItem>
+                        <SelectItem value="Retail">Retail</SelectItem>
+                        <SelectItem value="Telco">Telco</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Dominio principal *</Label>
+                  <Input value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} placeholder="example.com" className="font-mono" />
+                </div>
+                <Button onClick={addBrand} className="w-full">
+                  <Shield className="h-3.5 w-3.5 mr-1.5" />Agregar y empezar a monitorear
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         }
       />
 
-      {/* Brands overview */}
-      <Card className="bg-card/60 mb-6">
-        <div className="px-5 pt-4 pb-3 border-b border-border">
-          <h3 className="text-sm font-semibold">Marcas monitoreadas ({brands.length})</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">Bancos en Colombia, Guatemala, El Salvador y Panamá + fintechs y servicios</p>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+        {[
+          { label: 'Marcas monitoreadas', value: totals.brands, accent: 'text-primary' },
+          { label: 'Flagged', value: totals.flagged, accent: 'text-red-400' },
+          { label: 'Hallazgos totales', value: totals.findings, accent: 'text-orange-400' },
+          { label: 'Países', value: totals.countries, accent: 'text-sky-400' },
+        ].map((c) => (
+          <Card key={c.label} className="bg-card/60 p-4">
+            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{c.label}</div>
+            <div className={classNames('text-2xl font-semibold dc-mono mt-1', c.accent)}>{c.value}</div>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="bg-card/60">
+        <div className="px-4 py-3 border-b border-border flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" />Marcas en base de datos</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{brands.length} marcas persistidas en SQLite</p>
+          </div>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={load} disabled={loading}>
+            {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Refresh'}
+          </Button>
         </div>
         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
+          {brands.length === 0 && (
+            <div className="col-span-full text-center py-12 text-sm text-muted-foreground">
+              No hay marcas cargadas. Hacé clic en "Add Brand" para agregar la primera.
+            </div>
+          )}
           {brands.map((b) => {
-            const statusBadge = b.status === 'flagged'
-              ? 'bg-red-500/15 text-red-400 border-red-500/30'
-              : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+            const st = statusStyles[b.status] || statusStyles.active;
             return (
-              <button
-                key={b.id}
-                onClick={() => toast.info(`${b.name}`, { description: `${b.country} · ${b.domain} · ${b.findings} findings` })}
-                className="text-left rounded-lg border border-border bg-muted/20 hover:border-primary/40 hover:bg-muted/40 transition p-3"
-              >
+              <div key={b.id} className="rounded-lg border border-border bg-muted/20 hover:border-primary/40 transition p-3 group">
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="text-sm font-medium truncate">{b.name}</div>
                     <div className="text-[10px] text-muted-foreground font-mono truncate">{b.domain}</div>
                   </div>
-                  <Badge variant="outline" className={classNames('text-[10px] shrink-0', statusBadge)}>{b.status}</Badge>
+                  <Badge variant="outline" className={classNames('text-[10px] shrink-0', st.badge)}>{b.status}</Badge>
                 </div>
                 <div className="flex items-center gap-2 mt-2 text-[10px] text-muted-foreground">
                   <span>{b.country}</span>
@@ -90,131 +211,17 @@ export function BrandProtectionModule() {
                     </>
                   )}
                 </div>
-              </button>
+                <button
+                  onClick={() => deleteBrand(b)}
+                  className="opacity-0 group-hover:opacity-100 transition mt-2 text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1"
+                >
+                  <Trash2 className="h-3 w-3" />Eliminar
+                </button>
+              </div>
             );
           })}
         </div>
       </Card>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        {[
-          { label: 'Monitored Targets', value: totals.targets, accent: 'text-primary' },
-          { label: 'Flagged', value: totals.flagged, accent: 'text-red-400' },
-          { label: 'Fake Apps Detected', value: totals.fakeApps, accent: 'text-orange-400' },
-          { label: 'Pending Takedown', value: totals.pendingApps, accent: 'text-amber-400' },
-        ].map((c) => (
-          <Card key={c.label} className="bg-card/60 p-4">
-            <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{c.label}</div>
-            <div className={classNames('text-2xl font-semibold dc-mono mt-1', c.accent)}>{c.value}</div>
-          </Card>
-        ))}
-      </div>
-
-      <Tabs value={tab} onValueChange={setTab}>
-        <TabsList className="bg-muted/40">
-          <TabsTrigger value="targets">Monitored Targets</TabsTrigger>
-          <TabsTrigger value="fake-apps">Fake Apps</TabsTrigger>
-        </TabsList>
-
-        {/* Monitored Targets */}
-        <TabsContent value="targets" className="mt-4">
-          <Card className="bg-card/60 overflow-hidden">
-            <div className="overflow-x-auto dc-scroll">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/40 border-b border-border">
-                  <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground">
-                    <th className="px-4 py-3 font-medium">Brand / Target</th>
-                    <th className="px-4 py-3 font-medium">Type</th>
-                    <th className="px-4 py-3 font-medium">Status</th>
-                    <th className="px-4 py-3 font-medium">Findings</th>
-                    <th className="px-4 py-3 font-medium">Last Scan</th>
-                    <th className="px-4 py-3 font-medium text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {brandTargets.map((t) => {
-                    const Icon = typeIcon[t.type];
-                    const st = statusStyles[t.status];
-                    return (
-                      <tr key={t.id} className="hover:bg-muted/30 transition">
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2.5">
-                            <div className="h-8 w-8 rounded-md bg-muted/50 flex items-center justify-center shrink-0">
-                              <Icon className="h-4 w-4" />
-                            </div>
-                            <div>
-                              <div className="font-medium text-[13px]">{t.brand}</div>
-                              <div className="text-[11px] text-muted-foreground font-mono">{t.target}</div>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-xs capitalize">{t.type}</td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className={classNames('text-[10px]', st.badge)}>{st.label}</Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={classNames('font-mono text-sm', t.findings > 0 ? 'text-red-400' : 'text-muted-foreground')}>
-                            {t.findings}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">{formatRelative(t.lastScan)}</td>
-                        <td className="px-4 py-3 text-right">
-                          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => toast.info(`Detalles: ${t.target}`, { description: `Estado: ${t.status} · Findings: ${t.findings}` })}>Details</Button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        </TabsContent>
-
-        {/* Fake Apps */}
-        <TabsContent value="fake-apps" className="mt-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {fakeApps.map((a) => {
-              const st = fakeStatusStyles[a.status];
-              const scoreColor = a.maliciousScore >= 85 ? 'text-red-400' : a.maliciousScore >= 70 ? 'text-orange-400' : 'text-yellow-400';
-              return (
-                <Card key={a.id} className="bg-card/60 p-4">
-                  <div className="flex items-start gap-3">
-                    <div className="h-11 w-11 rounded-lg bg-red-500/10 flex items-center justify-center shrink-0">
-                      <AlertTriangle className="h-5 w-5 text-red-400" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="font-medium text-sm">{a.appName}</div>
-                          <div className="text-xs text-muted-foreground">by {a.developer}</div>
-                        </div>
-                        <Badge variant="outline" className={classNames('text-[10px] shrink-0', st.badge)}>{st.label}</Badge>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 mt-3 text-xs">
-                        <div>
-                          <div className="text-muted-foreground">Impersonates</div>
-                          <div className="font-medium">{a.impersonated}</div>
-                        </div>
-                        <div>
-                          <div className="text-muted-foreground">Platform</div>
-                          <div className="font-medium">{a.platform}</div>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="text-xs text-muted-foreground">Malicious Score</div>
-                          <div className={classNames('text-lg font-bold dc-mono', scoreColor)}>{a.maliciousScore}</div>
-                        </div>
-                        <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => toast.success('Takedown enviado', { description: `Reporte DMCA / Google Play enviado para "${a.appName}".` })}>Submit takedown</Button>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        </TabsContent>
-      </Tabs>
     </div>
   );
 }

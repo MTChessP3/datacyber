@@ -1,113 +1,116 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import { ModuleHeader, SectionCard } from '@/components/ui-blocks';
-import { threats } from '@/lib/data';
+import { useState, useEffect, useCallback } from 'react';
+import { ModuleHeader } from '@/components/ui-blocks';
+import { authFetch } from '@/lib/store';
 import { severityVariant, statusVariant, formatRelative, classNames } from '@/lib/helpers';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select';
-import { AlertTriangle, Filter, Search, Download, ShieldOff } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AlertTriangle, Search, Download, Loader2 } from 'lucide-react';
 import type { Severity, ThreatStatus } from '@/lib/types';
 import { toast } from 'sonner';
+
+interface ThreatRow {
+  id: string;
+  title: string;
+  source: string;
+  severity: string;
+  status: string;
+  category: string;
+  confidence: number;
+  detectedAt: string;
+}
 
 export function ThreatsModule() {
   const [search, setSearch] = useState('');
   const [sev, setSev] = useState<Severity | 'all'>('all');
   const [status, setStatus] = useState<ThreatStatus | 'all'>('all');
+  const [threats, setThreats] = useState<ThreatRow[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const filtered = useMemo(() => {
-    return threats.filter((t) => {
-      if (sev !== 'all' && t.severity !== sev) return false;
-      if (status !== 'all' && t.status !== status) return false;
-      if (search && !`${t.title} ${t.source} ${t.category}`.toLowerCase().includes(search.toLowerCase())) return false;
-      return true;
-    });
-  }, [search, sev, status]);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await authFetch('/api/threats');
+      if (res.ok) setThreats(await res.json());
+    } finally { setLoading(false); }
+  }, []);
 
-  const counts = useMemo(() => ({
-    critical: threats.filter((t) => t.severity === 'critical').length,
-    high: threats.filter((t) => t.severity === 'high').length,
-    medium: threats.filter((t) => t.severity === 'medium').length,
-    low: threats.filter((t) => t.severity === 'low').length,
-    new: threats.filter((t) => t.status === 'new').length,
-    investigating: threats.filter((t) => t.status === 'investigating').length,
-    resolved: threats.filter((t) => t.status === 'resolved').length,
-    false_positive: threats.filter((t) => t.status === 'false_positive').length,
-  }), []);
+  useEffect(() => { load(); }, [load]);
+
+  const filtered = threats.filter((t) => {
+    if (sev !== 'all' && t.severity !== sev) return false;
+    if (status !== 'all' && t.status !== status) return false;
+    if (search && !`${t.title} ${t.source} ${t.category}`.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  function exportCsv() {
+    const rows = [
+      ['ID', 'Title', 'Source', 'Severity', 'Status', 'Category', 'Confidence', 'Detected'],
+      ...filtered.map(t => [t.id, t.title, t.source, t.severity, t.status, t.category, t.confidence, t.detectedAt]),
+    ];
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `threats-${Date.now()}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success(`Exportadas ${filtered.length} amenazas a CSV`);
+  }
 
   return (
     <div>
       <ModuleHeader
         title="Threats"
-        description="Todas las amenazas detectadas para las 11 marcas monitoreadas: phishing, brand abuse, malware, leaks, dominios y menciones sociales."
-        actions={
-          <>
-            <Button variant="outline" size="sm" onClick={() => toast.success('Exportando CSV…', { description: `${threats.length} amenazas en el export.` })}><Filter className="h-3.5 w-3.5 mr-1.5" />Export CSV</Button>
-            <Button size="sm" onClick={() => toast.info('Bulk triage', { description: 'Seleccioná amenazas con los checkboxes para triage masivo.' })}><ShieldOff className="h-3.5 w-3.5 mr-1.5" />Bulk triage</Button>
-          </>
-        }
+        description={`${threats.length} amenazas persistidas en base de datos. Filtros y export CSV real.`}
+        actions={<Button variant="outline" size="sm" onClick={exportCsv}><Download className="h-3.5 w-3.5 mr-1.5" />Export CSV</Button>}
       />
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-        {[
-          { label: 'Critical', value: counts.critical, accent: 'border-red-500/30 bg-red-500/5 text-red-400' },
-          { label: 'High', value: counts.high, accent: 'border-orange-500/30 bg-orange-500/5 text-orange-400' },
-          { label: 'New', value: counts.new, accent: 'border-amber-500/30 bg-amber-500/5 text-amber-400' },
-          { label: 'Resolved', value: counts.resolved, accent: 'border-emerald-500/30 bg-emerald-500/5 text-emerald-400' },
-        ].map((c) => (
-          <Card key={c.label} className={classNames('p-4', c.accent)}>
-            <div className="text-[11px] uppercase tracking-wider opacity-80">{c.label}</div>
-            <div className="text-3xl font-semibold dc-mono mt-1">{c.value}</div>
-          </Card>
-        ))}
+        {['critical', 'high', 'medium', 'low'].map(s => {
+          const count = threats.filter(t => t.severity === s).length;
+          const sev = severityVariant[s as Severity];
+          return (
+            <Card key={s} className={classNames('p-4', sev.badge)}>
+              <div className="text-[11px] uppercase tracking-wider opacity-80">{sev.label}</div>
+              <div className="text-3xl font-semibold dc-mono mt-1">{count}</div>
+            </Card>
+          );
+        })}
       </div>
 
-      {/* Filters */}
-      <Card className="bg-card/60 mb-4">
-        <div className="p-4 flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search by title, source or category…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9 h-9"
-            />
-          </div>
-          <Select value={sev} onValueChange={(v) => setSev(v as any)}>
-            <SelectTrigger className="w-full sm:w-[160px] h-9">
-              <SelectValue placeholder="Severity" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All severities</SelectItem>
-              <SelectItem value="critical">Critical</SelectItem>
-              <SelectItem value="high">High</SelectItem>
-              <SelectItem value="medium">Medium</SelectItem>
-              <SelectItem value="low">Low</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={status} onValueChange={(v) => setStatus(v as any)}>
-            <SelectTrigger className="w-full sm:w-[170px] h-9">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="new">New</SelectItem>
-              <SelectItem value="investigating">Investigating</SelectItem>
-              <SelectItem value="resolved">Resolved</SelectItem>
-              <SelectItem value="false_positive">False Positive</SelectItem>
-            </SelectContent>
-          </Select>
+      <Card className="bg-card/60 mb-4 p-4 flex flex-col sm:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input placeholder="Buscar…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-9 h-9" />
         </div>
+        <Select value={sev} onValueChange={(v) => setSev(v as any)}>
+          <SelectTrigger className="w-full sm:w-[160px] h-9"><SelectValue placeholder="Severity" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All severities</SelectItem>
+            <SelectItem value="critical">Critical</SelectItem>
+            <SelectItem value="high">High</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="low">Low</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={(v) => setStatus(v as any)}>
+          <SelectTrigger className="w-full sm:w-[170px] h-9"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="new">New</SelectItem>
+            <SelectItem value="investigating">Investigating</SelectItem>
+            <SelectItem value="resolved">Resolved</SelectItem>
+            <SelectItem value="false_positive">False Positive</SelectItem>
+          </SelectContent>
+        </Select>
       </Card>
 
-      {/* Threats list */}
       <Card className="bg-card/60 overflow-hidden">
         <div className="overflow-x-auto dc-scroll">
           <table className="w-full text-sm">
@@ -119,13 +122,18 @@ export function ThreatsModule() {
                 <th className="px-4 py-3 font-medium">Status</th>
                 <th className="px-4 py-3 font-medium">Confidence</th>
                 <th className="px-4 py-3 font-medium">Detected</th>
-                <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
+              {loading && (
+                <tr><td colSpan={6} className="px-4 py-8 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></td></tr>
+              )}
+              {!loading && filtered.length === 0 && (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No threats match your filters.</td></tr>
+              )}
               {filtered.map((t) => {
-                const sv = severityVariant[t.severity];
-                const stv = statusVariant[t.status];
+                const sv = severityVariant[t.severity as Severity] || severityVariant.info;
+                const stv = statusVariant[t.status as ThreatStatus] || statusVariant.new;
                 return (
                   <tr key={t.id} className="hover:bg-muted/30 transition">
                     <td className="px-4 py-3">
@@ -135,58 +143,36 @@ export function ThreatsModule() {
                         </div>
                         <div className="min-w-0">
                           <div className="font-medium text-[13px] leading-snug">{t.title}</div>
-                          <div className="text-[11px] text-muted-foreground mt-0.5 capitalize">
-                            {t.category.replace('_', ' ')}
-                          </div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5 capitalize">{t.category.replace('_', ' ')}</div>
                         </div>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{t.source}</td>
                     <td className="px-4 py-3">
-                      <Badge variant="outline" className={classNames('text-[10px] font-medium', sv.badge)}>
-                        <span className={classNames('h-1.5 w-1.5 rounded-full mr-1', sv.dot)} />
-                        {sv.label}
+                      <Badge variant="outline" className={classNames('text-[10px]', sv.badge)}>
+                        <span className={classNames('h-1.5 w-1.5 rounded-full mr-1', sv.dot)} />{sv.label}
                       </Badge>
                     </td>
                     <td className="px-4 py-3">
-                      <Badge variant="outline" className={classNames('text-[10px] font-medium', stv.badge)}>
-                        {stv.label}
-                      </Badge>
+                      <Badge variant="outline" className={classNames('text-[10px]', stv.badge)}>{stv.label}</Badge>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-12 rounded-full bg-muted overflow-hidden">
-                          <div
-                            className={classNames('h-full rounded-full', t.confidence >= 80 ? 'bg-red-500' : t.confidence >= 60 ? 'bg-orange-500' : 'bg-yellow-500')}
-                            style={{ width: `${t.confidence}%` }}
-                          />
+                          <div className={classNames('h-full rounded-full', t.confidence >= 80 ? 'bg-red-500' : t.confidence >= 60 ? 'bg-orange-500' : 'bg-yellow-500')} style={{ width: `${t.confidence}%` }} />
                         </div>
                         <span className="text-xs font-mono">{t.confidence}%</span>
                       </div>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{formatRelative(t.detectedAt)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => toast.info(`Investigando: ${t.title.slice(0, 50)}…`, { description: `Confianza: ${t.confidence}% · Estado: ${t.status}` })}>Investigate</Button>
-                    </td>
                   </tr>
                 );
               })}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={7} className="px-4 py-12 text-center text-sm text-muted-foreground">
-                    No threats match your filters.
-                  </td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
-        <div className="px-4 py-3 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
-          <span>Showing {filtered.length} of {threats.length} threats</span>
-          <Button variant="ghost" size="sm" className="text-xs" onClick={() => toast.success('Descarga iniciada', { description: `CSV con ${filtered.length} amenazas.` })}>
-            <Download className="h-3.5 w-3.5 mr-1" />
-            Export
-          </Button>
+        <div className="px-4 py-3 border-t border-border text-xs text-muted-foreground">
+          Mostrando {filtered.length} de {threats.length} amenazas
         </div>
       </Card>
     </div>
