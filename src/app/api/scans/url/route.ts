@@ -1,20 +1,18 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { db, getAuthUser, logActivity } from '@/lib/api-helpers';
-import https from 'https';
 import tls from 'tls';
-import { URL } from 'url';
+import { URL as NodeURL } from 'url';
+
+// Análisis REAL de URL — serverless, no escribe en DB
+// El frontend persiste el resultado en localStorage
 
 export async function POST(req: NextRequest) {
-  const user = getAuthUser(req);
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
   try {
     const { url } = await req.json();
     if (!url) return NextResponse.json({ error: 'URL is required' }, { status: 400 });
 
-    let parsed: URL;
+    let parsed: NodeURL.URL;
     try {
-      parsed = new URL(url);
+      parsed = new NodeURL(url);
     } catch {
       return NextResponse.json({ error: 'Invalid URL' }, { status: 400 });
     }
@@ -22,63 +20,54 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Only http/https URLs are supported' }, { status: 400 });
     }
 
-    // Crear registro inicial
-    const scan = await db.urlScan.create({
-      data: { url, submittedBy: user.username, status: 'processing' },
-    });
-
-    // Ejecutar análisis asíncrono
-    analyzeUrl(scan.id, url).catch(console.error);
-
-    return NextResponse.json({ id: scan.id, status: 'processing', url });
+    const result = await analyzeUrl(url);
+    return NextResponse.json(result);
   } catch (e: any) {
     return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
 
-export async function GET(req: NextRequest) {
-  const user = getAuthUser(req);
-  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get('id');
-  if (id) {
-    const scan = await db.urlScan.findUnique({ where: { id } });
-    if (!scan) return NextResponse.json({ error: 'Not found' }, { status: 404 });
-    return NextResponse.json(scan);
-  }
-  const scans = await db.urlScan.findMany({ orderBy: { submittedAt: 'desc' }, take: 50 });
-  return NextResponse.json(scans);
+interface AnalysisResult {
+  url: string;
+  status: 'completed' | 'failed';
+  threatScore: number;
+  finalUrl: string;
+  ipAddress: string;
+  redirects: number;
+  sslValid: boolean | null;
+  sslIssuer: string;
+  sslValidFrom: string;
+  sslValidTo: string;
+  detections: { engine: string; verdict: string }[];
+  error?: string;
 }
 
-async function analyzeUrl(scanId: string, urlStr: string) {
+async function analyzeUrl(urlStr: string): Promise<AnalysisResult> {
   const detections: { engine: string; verdict: string }[] = [];
   let threatScore = 0;
   let finalUrl = urlStr;
   let redirects = 0;
   let ipAddress = '';
-  let sslValid = false;
+  let sslValid: boolean | null = null;
   let sslIssuer = '';
   let sslValidFrom = '';
   let sslValidTo = '';
 
+  const parsed = new NodeURL(urlStr);
+
   try {
     // 1. Resolver DNS vía Cloudflare DoH
-    const parsed = new URL(urlStr);
     const dohUrl = `https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(parsed.hostname)}&type=A`;
     const dohRes = await fetch(dohUrl, { headers: { accept: 'application/dns-json' } });
     const dohData: any = await dohRes.json();
     if (dohData.Answer) {
       const aRecords = dohData.Answer.filter((a: any) => a.type === 1);
-      if (aRecords.length > 0) {
-        ipAddress = aRecords[0].data;
-      }
+      if (aRecords.length > 0) ipAddress = aRecords[0].data;
     }
 
-    // 2. Trace redirects con fetch nativo
-    const redirectChain: string[] = [];
+    // 2. Trace redirects
     let currentUrl = urlStr;
     for (let i = 0; i < 10; i++) {
-      redirectChain.push(currentUrl);
       try {
         const res = await fetch(currentUrl, {
           redirect: 'manual',
@@ -87,14 +76,13 @@ async function analyzeUrl(scanId: string, urlStr: string) {
         });
         if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
           const loc = res.headers.get('location')!;
-          currentUrl = new URL(loc, currentUrl).href;
+          currentUrl = new NodeURL(loc, currentUrl).href;
           redirects++;
         } else {
           finalUrl = currentUrl;
           break;
         }
       } catch (e: any) {
-        // Timeout o connection refused → sospechoso
         detections.push({ engine: 'DataCyber Internal', verdict: `Connection failed: ${e.message}` });
         threatScore += 20;
         break;
@@ -105,7 +93,7 @@ async function analyzeUrl(scanId: string, urlStr: string) {
     // 3. SSL info real con tls.connect
     if (parsed.protocol === 'https:') {
       try {
-        await new Promise<void>((resolve, reject) => {
+        await new Promise<void>((resolve) => {
           const socket = tls.connect({
             host: parsed.hostname,
             port: 443,
@@ -126,16 +114,16 @@ async function analyzeUrl(scanId: string, urlStr: string) {
             socket.end();
             resolve();
           });
-          socket.on('error', (e) => {
-            detections.push({ engine: 'SSL Validator', verdict: `SSL connection failed: ${e.message}` });
+          socket.on('error', () => {
+            detections.push({ engine: 'SSL Validator', verdict: 'SSL connection failed' });
             threatScore += 30;
             resolve();
           });
           setTimeout(() => { socket.destroy(); resolve(); }, 5000);
         });
-      } catch (e: any) {
+      } catch {
         sslValid = false;
-        detections.push({ engine: 'SSL Validator', verdict: `SSL error: ${e.message}` });
+        detections.push({ engine: 'SSL Validator', verdict: 'SSL error' });
         threatScore += 25;
       }
     } else {
@@ -143,46 +131,12 @@ async function analyzeUrl(scanId: string, urlStr: string) {
       threatScore += 15;
     }
 
-    // 4. Google Safe Browsing Lookup API (v4) — requiere API key, sin key marcamos como N/A
-    // Si el usuario configura SAFE_BROWSING_API_KEY en settings, lo usamos
-    const sbKey = process.env.SAFE_BROWSING_API_KEY;
-    if (sbKey) {
-      try {
-        const sbRes = await fetch(`https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${sbKey}`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            client: { clientId: 'datacyber', clientVersion: '1.0' },
-            threatInfo: {
-              threatTypes: ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE', 'POTENTIALLY_HARMFUL_APPLICATION'],
-              platformTypes: ['ANY_PLATFORM'],
-              threatEntryTypes: ['URL'],
-              threatEntries: [{ url: urlStr }],
-            },
-          }),
-        });
-        const sbData: any = await sbRes.json();
-        if (sbData.matches && sbData.matches.length > 0) {
-          threatScore += 60;
-          for (const m of sbData.matches) {
-            detections.push({ engine: 'Google Safe Browsing', verdict: m.threatType });
-          }
-        } else {
-          detections.push({ engine: 'Google Safe Browsing', verdict: 'Clean' });
-        }
-      } catch (e: any) {
-        detections.push({ engine: 'Google Safe Browsing', verdict: `Lookup error: ${e.message}` });
-      }
-    } else {
-      detections.push({ engine: 'Google Safe Browsing', verdict: 'API key not configured — enable in Settings' });
-    }
-
-    // 5. Heurísticas adicionales
+    // 4. Heurísticas
     const hostname = parsed.hostname.toLowerCase();
     const suspiciousTld = ['.tk', '.ml', '.ga', '.cf', '.gq', '.top', '.xyz', '.click', '.work'];
     if (suspiciousTld.some(tld => hostname.endsWith(tld))) {
       threatScore += 20;
-      detections.push({ engine: 'Heuristics', verdict: `Suspicious TLD: ${hostname.split('.').pop()}` });
+      detections.push({ engine: 'Heuristics', verdict: `Suspicious TLD: .${hostname.split('.').pop()}` });
     }
     if (/\d+\.\d+\.\d+\.\d+/.test(hostname)) {
       threatScore += 15;
@@ -203,29 +157,33 @@ async function analyzeUrl(scanId: string, urlStr: string) {
 
     threatScore = Math.min(100, threatScore);
 
-    await db.urlScan.update({
-      where: { id: scanId },
-      data: {
-        status: 'completed',
-        threatScore,
-        finalUrl,
-        ipAddress,
-        redirects,
-        sslValid,
-        sslIssuer,
-        sslValidFrom,
-        sslValidTo,
-        detections: JSON.stringify(detections),
-      },
-    });
-
-    await logActivity('scan', `URL scan completed: ${urlStr} (score: ${threatScore})`,
-      threatScore >= 70 ? 'critical' : threatScore >= 40 ? 'high' : 'medium',
-      'System');
+    return {
+      url: urlStr,
+      status: 'completed',
+      threatScore,
+      finalUrl,
+      ipAddress,
+      redirects,
+      sslValid,
+      sslIssuer,
+      sslValidFrom,
+      sslValidTo,
+      detections,
+    };
   } catch (e: any) {
-    await db.urlScan.update({
-      where: { id: scanId },
-      data: { status: 'failed', error: e.message, detections: JSON.stringify(detections) },
-    });
+    return {
+      url: urlStr,
+      status: 'failed',
+      threatScore: 0,
+      finalUrl: '',
+      ipAddress: '',
+      redirects: 0,
+      sslValid: null,
+      sslIssuer: '',
+      sslValidFrom: '',
+      sslValidTo: '',
+      detections,
+      error: e.message,
+    };
   }
 }

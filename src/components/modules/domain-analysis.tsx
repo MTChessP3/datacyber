@@ -2,60 +2,49 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { ModuleHeader, SectionCard } from '@/components/ui-blocks';
-import { authFetch } from '@/lib/store';
+import { useAppStore } from '@/lib/store';
+import { loadDb, saveDb, genId } from '@/lib/local-db';
 import { classNames } from '@/lib/helpers';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Globe, Search, Server, FileLock2, Network, CalendarDays, Building2, CheckCircle2, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { Globe, Server, FileLock2, Network, CalendarDays, Building2, CheckCircle2, XCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface DomainScan {
+interface DomainScanResult {
   id: string;
   domain: string;
   scannedAt: string;
-  status: string;
-  registered: string | null;
-  expires: string | null;
-  registrar: string | null;
-  dnsSec: boolean | null;
+  status: 'completed' | 'failed' | 'processing';
+  registered: string;
+  expires: string;
+  registrar: string;
+  dnsSec: boolean;
   reputation: number;
-  openPorts: string | null;
-  subdomains: string | null;
-  securityHeaders: string | null;
-  ipAddresses: string | null;
-  nameServers: string | null;
-  error?: string | null;
+  openPorts: { port: number; service: string; risk: string }[];
+  subdomains: string[];
+  securityHeaders: { header: string; status: string; value: string }[];
+  ipAddresses: string[];
+  nameServers: string[];
+  error?: string;
 }
 
 export function DomainAnalysisModule() {
+  const user = useAppStore((s) => s.user);
   const [query, setQuery] = useState('');
-  const [scans, setScans] = useState<DomainScan[]>([]);
+  const [scans, setScans] = useState<DomainScanResult[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await authFetch('/api/scans/domain');
-      if (res.ok) {
-        const data = await res.json();
-        setScans(data);
-        if (data.length > 0 && !selectedId) setSelectedId(data[0].id);
-      }
-    } finally { setLoading(false); }
+  const load = useCallback(() => {
+    const db = loadDb();
+    const sorted = [...db.domainScans].sort((a, b) => b.scannedAt.localeCompare(a.scannedAt));
+    setScans(sorted as any);
+    if (sorted.length > 0 && !selectedId) setSelectedId(sorted[0].id);
   }, [selectedId]);
 
   useEffect(() => { load(); }, [load]);
-
-  useEffect(() => {
-    const hasProcessing = scans.some(s => s.status === 'processing');
-    if (!hasProcessing) return;
-    const interval = setInterval(load, 3000);
-    return () => clearInterval(interval);
-  }, [scans, load]);
 
   async function scan() {
     if (!query) {
@@ -63,25 +52,69 @@ export function DomainAnalysisModule() {
       return;
     }
     setSubmitting(true);
+
+    const tempId = genId('d');
+    const tempScan: DomainScanResult = {
+      id: tempId,
+      domain: query.replace(/^https?:\/\//, '').replace(/\/.*$/, ''),
+      scannedAt: new Date().toISOString(),
+      status: 'processing',
+      registered: '', expires: '', registrar: '', dnsSec: false,
+      reputation: 0,
+      openPorts: [], subdomains: [], securityHeaders: [], ipAddresses: [], nameServers: [],
+    };
+    const db = loadDb();
+    db.domainScans.push(tempScan as any);
+    saveDb(db);
+    setScans(prev => [tempScan, ...prev]);
+    setSelectedId(tempId);
+    setQuery('');
+
     try {
-      const res = await authFetch('/api/scans/domain', {
+      const res = await fetch('/api/scans/domain', {
         method: 'POST',
-        body: JSON.stringify({ domain: query }),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ domain: tempScan.domain }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.error || 'Error al escanear dominio');
+        toast.error(err.error || 'Error al escanear');
+        const db2 = loadDb();
+        const idx = db2.domainScans.findIndex((s: any) => s.id === tempId);
+        if (idx >= 0) {
+          db2.domainScans[idx] = { ...db2.domainScans[idx], status: 'failed', error: err.error } as any;
+          saveDb(db2);
+        }
+        setScans(prev => prev.map(s => s.id === tempId ? { ...s, status: 'failed', error: err.error } : s));
         return;
       }
-      const data = await res.json();
-      toast.success('Escaneo iniciado', { description: `Dominio: ${data.domain}` });
-      setQuery('');
-      setTimeout(async () => {
-        await load();
-        setSelectedId(data.id);
-      }, 500);
+      const result = await res.json();
+      const db2 = loadDb();
+      const idx = db2.domainScans.findIndex((s: any) => s.id === tempId);
+      if (idx >= 0) {
+        db2.domainScans[idx] = { ...db2.domainScans[idx], ...result, id: tempId, domain: tempScan.domain } as any;
+        saveDb(db2);
+      }
+      db2.activity.unshift({
+        id: genId('a'),
+        type: 'scan',
+        message: `Análisis dominio completado: ${tempScan.domain} (reputation: ${result.reputation})`,
+        severity: result.reputation < 30 ? 'critical' : result.reputation < 60 ? 'medium' : 'low',
+        actor: user?.username || 'system',
+        timestamp: new Date().toISOString(),
+      });
+      saveDb(db2);
+      setScans(prev => prev.map(s => s.id === tempId ? { ...s, ...result, status: 'completed' } : s));
+      toast.success('Escaneo completado', { description: `${tempScan.domain} — reputation ${result.reputation}/100` });
     } catch (e: any) {
       toast.error('Error: ' + e.message);
+      const db2 = loadDb();
+      const idx = db2.domainScans.findIndex((s: any) => s.id === tempId);
+      if (idx >= 0) {
+        db2.domainScans[idx] = { ...db2.domainScans[idx], status: 'failed', error: e.message } as any;
+        saveDb(db2);
+      }
+      setScans(prev => prev.map(s => s.id === tempId ? { ...s, status: 'failed', error: e.message } : s));
     } finally {
       setSubmitting(false);
     }
@@ -93,14 +126,13 @@ export function DomainAnalysisModule() {
     <div>
       <ModuleHeader
         title="Domain Analysis"
-        description="Análisis REAL de dominio: DNS lookup (A, NS, MX, TXT), enumeración de subdominios, escaneo de puertos, auditoría de security headers y WHOIS vía RDAP."
-        actions={null}
+        description="Análisis REAL: DNS lookup (A/NS/MX/TXT), enumeración de 40 subdominios, port scan (20 puertos), security headers audit y WHOIS vía RDAP. Persistido en tu navegador."
       />
 
       <Card className="bg-card/60 mb-6 p-5">
         <div className="flex flex-col sm:flex-row gap-2">
           <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Globe className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="example.com"
               value={query}
@@ -124,16 +156,14 @@ export function DomainAnalysisModule() {
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold">Dominios escaneados</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">{scans.length} en base de datos</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{scans.length} en tu navegador</p>
             </div>
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={load} disabled={loading}>
-              {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Refresh'}
-            </Button>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={load}>Refresh</Button>
           </div>
           <div className="p-2 space-y-1 max-h-[680px] overflow-y-auto dc-scroll">
             {scans.length === 0 && (
               <div className="text-center py-8 text-sm text-muted-foreground">
-                No hay dominios escaneados todavía.
+                No hay dominios escaneados. Escribí un dominio arriba.
               </div>
             )}
             {scans.map((d) => {
@@ -158,10 +188,12 @@ export function DomainAnalysisModule() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-sm font-mono truncate">{d.domain}</div>
-                    <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground">
-                      {d.status === 'completed' && <span>Reputation: {d.reputation}/100</span>}
-                      {d.status === 'completed' && <span>· {(() => { try { return JSON.parse(d.subdomains || '[]').length; } catch { return 0; } })()} subdominios</span>}
-                    </div>
+                    {d.status === 'completed' && (
+                      <div className="flex items-center gap-2 mt-1 text-[10px] text-muted-foreground">
+                        <span>Reputation: {d.reputation}/100</span>
+                        <span>· {d.subdomains.length} subdominios</span>
+                      </div>
+                    )}
                   </div>
                 </button>
               );
@@ -173,9 +205,7 @@ export function DomainAnalysisModule() {
           {!selected ? (
             <Card className="bg-card/60 p-12 text-center">
               <Globe className="h-12 w-12 mx-auto text-muted-foreground/30 mb-3" />
-              <p className="text-sm text-muted-foreground">
-                Seleccioná un dominio o ejecutá un escaneo nuevo.
-              </p>
+              <p className="text-sm text-muted-foreground">Seleccioná un dominio o ejecutá un escaneo nuevo.</p>
             </Card>
           ) : (
             <>
@@ -185,9 +215,7 @@ export function DomainAnalysisModule() {
                     <Globe className="h-6 w-6 text-primary mt-1 shrink-0" />
                     <div className="min-w-0">
                       <h2 className="text-lg font-semibold font-mono break-all">{selected.domain}</h2>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        Escaneado: {new Date(selected.scannedAt).toLocaleString()}
-                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">Escaneado: {new Date(selected.scannedAt).toLocaleString()}</div>
                     </div>
                   </div>
                   <div className="text-right">
@@ -204,9 +232,7 @@ export function DomainAnalysisModule() {
                     <Loader2 className="h-5 w-5 text-amber-400 animate-spin" />
                     <div>
                       <div className="text-sm font-medium text-amber-400">Escaneando dominio…</div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
-                        Resolviendo DNS, enumerando subdominios, escaneando puertos y verificando headers.
-                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">DNS, subdominios, puertos y headers. Puede tardar 15-30 segundos.</div>
                     </div>
                   </div>
                 )}
@@ -224,9 +250,7 @@ export function DomainAnalysisModule() {
                       <div className="flex items-center gap-2 mb-3">
                         <FileLock2 className="h-4 w-4 text-muted-foreground" />
                         <h4 className="text-sm font-semibold">WHOIS / RDAP</h4>
-                        {selected.dnsSec && (
-                          <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30">DNSSEC</Badge>
-                        )}
+                        {selected.dnsSec && <Badge variant="outline" className="text-[10px] bg-emerald-500/15 text-emerald-400 border-emerald-500/30">DNSSEC</Badge>}
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                         <div className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-muted-foreground">Registrar:</span> {selected.registrar || '—'}</div>
@@ -234,17 +258,16 @@ export function DomainAnalysisModule() {
                         <div className="flex items-center gap-2"><CalendarDays className="h-3.5 w-3.5 text-muted-foreground" /><span className="text-muted-foreground">Expira:</span> {selected.expires || '—'}</div>
                       </div>
                     </div>
-
                     <div className="mt-5 pt-5 border-t border-border">
-                      <h4 className="text-sm font-semibold mb-3">DNS Resolución</h4>
+                      <h4 className="text-sm font-semibold mb-3">DNS</h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
                         <div>
                           <div className="text-muted-foreground mb-1">Direcciones IP (A)</div>
-                          <div className="font-mono">{(() => { try { return JSON.parse(selected.ipAddresses || '[]').join(', ') || '—'; } catch { return '—'; } })()}</div>
+                          <div className="font-mono">{selected.ipAddresses.join(', ') || '—'}</div>
                         </div>
                         <div>
                           <div className="text-muted-foreground mb-1">Name Servers (NS)</div>
-                          <div className="font-mono text-[11px]">{(() => { try { return JSON.parse(selected.nameServers || '[]').join(', ') || '—'; } catch { return '—'; } })()}</div>
+                          <div className="font-mono text-[11px]">{selected.nameServers.join(', ') || '—'}</div>
                         </div>
                       </div>
                     </div>
@@ -254,87 +277,69 @@ export function DomainAnalysisModule() {
 
               {selected.status === 'completed' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <SectionCard title="Puertos abiertos" description={`${(() => { try { return JSON.parse(selected.openPorts || '[]').length; } catch { return 0; } })()} detectados`}>
-                    {(() => {
-                      try {
-                        const ports = JSON.parse(selected.openPorts || '[]');
-                        if (ports.length === 0) return <div className="text-center py-6 text-sm text-muted-foreground">No se detectaron puertos abiertos</div>;
-                        return (
-                          <div className="space-y-2">
-                            {ports.map((p: any) => {
-                              const sv = p.risk === 'high' ? 'bg-red-500/15 text-red-400 border-red-500/30' :
-                                         p.risk === 'medium' ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' :
-                                         'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
-                              return (
-                                <div key={p.port} className="flex items-center justify-between gap-2 p-2.5 rounded-md border border-border bg-muted/20">
-                                  <div className="flex items-center gap-2.5">
-                                    <Server className="h-4 w-4 text-muted-foreground" />
-                                    <span className="font-mono text-sm">:{p.port}</span>
-                                    <span className="text-xs text-muted-foreground">{p.service}</span>
-                                  </div>
-                                  <Badge variant="outline" className={classNames('text-[10px] capitalize', sv)}>{p.risk}</Badge>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      } catch { return null; }
-                    })()}
+                  <SectionCard title="Puertos abiertos" description={`${selected.openPorts.length} detectados`}>
+                    {selected.openPorts.length === 0 ? (
+                      <div className="text-center py-6 text-sm text-muted-foreground">No se detectaron puertos abiertos</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {selected.openPorts.map((p) => {
+                          const sv = p.risk === 'high' ? 'bg-red-500/15 text-red-400 border-red-500/30' :
+                                     p.risk === 'medium' ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' :
+                                     'bg-emerald-500/15 text-emerald-400 border-emerald-500/30';
+                          return (
+                            <div key={p.port} className="flex items-center justify-between gap-2 p-2.5 rounded-md border border-border bg-muted/20">
+                              <div className="flex items-center gap-2.5">
+                                <Server className="h-4 w-4 text-muted-foreground" />
+                                <span className="font-mono text-sm">:{p.port}</span>
+                                <span className="text-xs text-muted-foreground">{p.service}</span>
+                              </div>
+                              <Badge variant="outline" className={classNames('text-[10px] capitalize', sv)}>{p.risk}</Badge>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </SectionCard>
 
-                  <SectionCard title="Subdominios" description={`${(() => { try { return JSON.parse(selected.subdomains || '[]').length; } catch { return 0; } })()} encontrados`}>
-                    {(() => {
-                      try {
-                        const subs = JSON.parse(selected.subdomains || '[]');
-                        if (subs.length === 0) return <div className="text-center py-6 text-sm text-muted-foreground">No se encontraron subdominios</div>;
-                        return (
-                          <div className="space-y-1 max-h-[280px] overflow-y-auto dc-scroll">
-                            {subs.map((s: string) => (
-                              <div key={s} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted/40 transition">
-                                <Network className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                                <span className="font-mono text-xs break-all">{s}</span>
-                              </div>
-                            ))}
+                  <SectionCard title="Subdominios" description={`${selected.subdomains.length} encontrados`}>
+                    {selected.subdomains.length === 0 ? (
+                      <div className="text-center py-6 text-sm text-muted-foreground">No se encontraron subdominios</div>
+                    ) : (
+                      <div className="space-y-1 max-h-[280px] overflow-y-auto dc-scroll">
+                        {selected.subdomains.map((s) => (
+                          <div key={s} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted/40 transition">
+                            <Network className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                            <span className="font-mono text-xs break-all">{s}</span>
                           </div>
-                        );
-                      } catch { return null; }
-                    })()}
+                        ))}
+                      </div>
+                    )}
                   </SectionCard>
                 </div>
               )}
 
-              {selected.status === 'completed' && selected.securityHeaders && (
+              {selected.status === 'completed' && selected.securityHeaders.length > 0 && (
                 <SectionCard title="Security headers" description="Auditoría HTTP real">
-                  {(() => {
-                    try {
-                      const headers = JSON.parse(selected.securityHeaders);
+                  <div className="space-y-1.5">
+                    {selected.securityHeaders.map((h) => {
+                      const Icon = h.status === 'pass' ? CheckCircle2 : h.status === 'warn' ? AlertTriangle : XCircle;
+                      const color = h.status === 'pass' ? 'text-emerald-400' : h.status === 'warn' ? 'text-yellow-400' : 'text-red-400';
                       return (
-                        <div className="space-y-1.5">
-                          {headers.map((h: any) => {
-                            const Icon = h.status === 'pass' ? CheckCircle2 : h.status === 'warn' ? AlertTriangle : XCircle;
-                            const color = h.status === 'pass' ? 'text-emerald-400' : h.status === 'warn' ? 'text-yellow-400' : 'text-red-400';
-                            return (
-                              <div key={h.header} className="flex items-center justify-between gap-3 p-2.5 rounded-md border border-border bg-muted/20">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <Icon className={classNames('h-4 w-4 shrink-0', color)} />
-                                  <div className="min-w-0">
-                                    <div className="text-sm font-mono truncate">{h.header}</div>
-                                    <div className="text-[11px] text-muted-foreground font-mono truncate">{h.value}</div>
-                                  </div>
-                                </div>
-                                <Badge variant="outline" className={classNames('text-[10px] capitalize shrink-0',
-                                  h.status === 'pass' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
-                                  h.status === 'warn' ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30' :
-                                  'bg-red-500/15 text-red-400 border-red-500/30')}>
-                                  {h.status}
-                                </Badge>
-                              </div>
-                            );
-                          })}
+                        <div key={h.header} className="flex items-center justify-between gap-3 p-2.5 rounded-md border border-border bg-muted/20">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <Icon className={classNames('h-4 w-4 shrink-0', color)} />
+                            <div className="min-w-0">
+                              <div className="text-sm font-mono truncate">{h.header}</div>
+                              <div className="text-[11px] text-muted-foreground font-mono truncate">{h.value}</div>
+                            </div>
+                          </div>
+                          <Badge variant="outline" className={classNames('text-[10px] capitalize shrink-0',
+                            h.status === 'pass' ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' :
+                            'bg-red-500/15 text-red-400 border-red-500/30')}>{h.status}</Badge>
                         </div>
                       );
-                    } catch { return null; }
-                    })()}
+                    })}
+                  </div>
                 </SectionCard>
               )}
             </>

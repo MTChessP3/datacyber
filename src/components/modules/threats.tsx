@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { ModuleHeader } from '@/components/ui-blocks';
-import { authFetch } from '@/lib/store';
+import { loadDb } from '@/lib/local-db';
 import { severityVariant, statusVariant, formatRelative, classNames } from '@/lib/helpers';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,33 +10,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertTriangle, Search, Download, Loader2 } from 'lucide-react';
-import type { Severity, ThreatStatus } from '@/lib/types';
+import type { Severity, ThreatStatus, Threat } from '@/lib/types';
 import { toast } from 'sonner';
-
-interface ThreatRow {
-  id: string;
-  title: string;
-  source: string;
-  severity: string;
-  status: string;
-  category: string;
-  confidence: number;
-  detectedAt: string;
-}
 
 export function ThreatsModule() {
   const [search, setSearch] = useState('');
   const [sev, setSev] = useState<Severity | 'all'>('all');
   const [status, setStatus] = useState<ThreatStatus | 'all'>('all');
-  const [threats, setThreats] = useState<ThreatRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [threats, setThreats] = useState<Threat[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await authFetch('/api/threats');
-      if (res.ok) setThreats(await res.json());
-    } finally { setLoading(false); }
+  const load = useCallback(() => {
+    setThreats(loadDb().threats);
+    setLoading(false);
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -67,17 +53,17 @@ export function ThreatsModule() {
     <div>
       <ModuleHeader
         title="Threats"
-        description={`${threats.length} amenazas persistidas en base de datos. Filtros y export CSV real.`}
+        description={`${threats.length} amenazas en localStorage. Filtros y export CSV real.`}
         actions={<Button variant="outline" size="sm" onClick={exportCsv}><Download className="h-3.5 w-3.5 mr-1.5" />Export CSV</Button>}
       />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         {['critical', 'high', 'medium', 'low'].map(s => {
           const count = threats.filter(t => t.severity === s).length;
-          const sev = severityVariant[s as Severity];
+          const sv = severityVariant[s as Severity];
           return (
-            <Card key={s} className={classNames('p-4', sev.badge)}>
-              <div className="text-[11px] uppercase tracking-wider opacity-80">{sev.label}</div>
+            <Card key={s} className={classNames('p-4', sv.badge)}>
+              <div className="text-[11px] uppercase tracking-wider opacity-80">{sv.label}</div>
               <div className="text-3xl font-semibold dc-mono mt-1">{count}</div>
             </Card>
           );
@@ -125,15 +111,11 @@ export function ThreatsModule() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {loading && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></td></tr>
-              )}
-              {!loading && filtered.length === 0 && (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No threats match your filters.</td></tr>
-              )}
+              {loading && <tr><td colSpan={6} className="px-4 py-8 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></td></tr>}
+              {!loading && filtered.length === 0 && <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No threats match your filters.</td></tr>}
               {filtered.map((t) => {
-                const sv = severityVariant[t.severity as Severity] || severityVariant.info;
-                const stv = statusVariant[t.status as ThreatStatus] || statusVariant.new;
+                const sv = severityVariant[t.severity] || severityVariant.info;
+                const stv = statusVariant[t.status] || statusVariant.new;
                 return (
                   <tr key={t.id} className="hover:bg-muted/30 transition">
                     <td className="px-4 py-3">

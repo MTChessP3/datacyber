@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { ModuleHeader, SectionCard } from '@/components/ui-blocks';
-import { authFetch } from '@/lib/store';
+import { useAppStore } from '@/lib/store';
+import { loadDb, saveDb, genId } from '@/lib/local-db';
 import { formatDateTime, classNames } from '@/lib/helpers';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -11,59 +12,42 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Link2, ScanLine, Globe, Shield, AlertTriangle, CheckCircle2, XCircle,
-  Lock, Server, Activity, Loader2,
+  Lock, Activity, Loader2, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-interface UrlScan {
+interface UrlScanResult {
   id: string;
   url: string;
   submittedAt: string;
-  status: string;
+  status: 'completed' | 'failed' | 'processing';
   threatScore: number;
-  finalUrl: string | null;
-  ipAddress: string | null;
+  finalUrl: string;
+  ipAddress: string;
   redirects: number;
   sslValid: boolean | null;
-  sslIssuer: string | null;
-  sslValidFrom: string | null;
-  sslValidTo: string | null;
-  detections: string | null;
-  error?: string | null;
+  sslIssuer: string;
+  sslValidFrom: string;
+  sslValidTo: string;
+  detections: { engine: string; verdict: string }[];
+  error?: string;
 }
 
 export function UrlForensicsModule() {
+  const user = useAppStore((s) => s.user);
   const [url, setUrl] = useState('');
-  const [scans, setScans] = useState<UrlScan[]>([]);
+  const [scans, setScans] = useState<UrlScanResult[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const loadScans = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await authFetch('/api/scans/url');
-      if (res.ok) {
-        const data = await res.json();
-        setScans(data);
-        if (data.length > 0 && !selectedId) setSelectedId(data[0].id);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+  const load = useCallback(() => {
+    const db = loadDb();
+    const sorted = [...db.urlScans].sort((a, b) => b.submittedAt.localeCompare(a.submittedAt));
+    setScans(sorted);
+    if (sorted.length > 0 && !selectedId) setSelectedId(sorted[0].id);
   }, [selectedId]);
 
-  useEffect(() => { loadScans(); }, [loadScans]);
-
-  // Poll cada 3s si hay scans en proceso
-  useEffect(() => {
-    const hasProcessing = scans.some(s => s.status === 'processing');
-    if (!hasProcessing) return;
-    const interval = setInterval(loadScans, 3000);
-    return () => clearInterval(interval);
-  }, [scans, loadScans]);
+  useEffect(() => { load(); }, [load]);
 
   async function analyze() {
     if (!url) {
@@ -71,26 +55,75 @@ export function UrlForensicsModule() {
       return;
     }
     setSubmitting(true);
+
+    // Agregar scan "processing" inmediatamente
+    const tempId = genId('u');
+    const tempScan: UrlScanResult = {
+      id: tempId,
+      url,
+      submittedAt: new Date().toISOString(),
+      status: 'processing',
+      threatScore: 0,
+      finalUrl: '', ipAddress: '', redirects: 0,
+      sslValid: null, sslIssuer: '', sslValidFrom: '', sslValidTo: '',
+      detections: [],
+    };
+    const db = loadDb();
+    db.urlScans.push(tempScan as any);
+    saveDb(db);
+    setScans(prev => [tempScan, ...prev]);
+    setSelectedId(tempId);
+    setUrl('');
+
     try {
-      const res = await authFetch('/api/scans/url', {
+      const res = await fetch('/api/scans/url', {
         method: 'POST',
-        body: JSON.stringify({ url }),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ url: tempScan.url }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         toast.error(err.error || 'Error al analizar URL');
+        // Marcar como failed
+        const db2 = loadDb();
+        const idx = db2.urlScans.findIndex((s: any) => s.id === tempId);
+        if (idx >= 0) {
+          db2.urlScans[idx] = { ...db2.urlScans[idx], status: 'failed', error: err.error } as any;
+          saveDb(db2);
+        }
+        setScans(prev => prev.map(s => s.id === tempId ? { ...s, status: 'failed', error: err.error } : s));
         return;
       }
-      const data = await res.json();
-      toast.success('Análisis iniciado', { description: `Escaneando ${url}…` });
-      setUrl('');
-      // Recargar inmediatamente y seleccionar el nuevo
-      setTimeout(async () => {
-        await loadScans();
-        setSelectedId(data.id);
-      }, 500);
+      const result = await res.json();
+      // Actualizar en DB
+      const db2 = loadDb();
+      const idx = db2.urlScans.findIndex((s: any) => s.id === tempId);
+      if (idx >= 0) {
+        db2.urlScans[idx] = { ...db2.urlScans[idx], ...result, id: tempId, url: tempScan.url } as any;
+        saveDb(db2);
+      }
+      // Agregar al activity log
+      db2.activity.unshift({
+        id: genId('a'),
+        type: 'scan',
+        message: `Análisis URL completado: ${tempScan.url} (score: ${result.threatScore})`,
+        severity: result.threatScore >= 70 ? 'critical' : result.threatScore >= 40 ? 'high' : 'medium',
+        actor: user?.username || 'system',
+        timestamp: new Date().toISOString(),
+      });
+      saveDb(db2);
+
+      setScans(prev => prev.map(s => s.id === tempId ? { ...s, ...result, status: 'completed' } : s));
+      toast.success('Análisis completado', { description: `Score: ${result.threatScore} — ${result.threatScore >= 70 ? 'MALICIOSO' : result.threatScore >= 40 ? 'SOSPECHOSO' : 'SEGURO'}` });
     } catch (e: any) {
       toast.error('Error: ' + e.message);
+      const db2 = loadDb();
+      const idx = db2.urlScans.findIndex((s: any) => s.id === tempId);
+      if (idx >= 0) {
+        db2.urlScans[idx] = { ...db2.urlScans[idx], status: 'failed', error: e.message } as any;
+        saveDb(db2);
+      }
+      setScans(prev => prev.map(s => s.id === tempId ? { ...s, status: 'failed', error: e.message } : s));
     } finally {
       setSubmitting(false);
     }
@@ -102,8 +135,8 @@ export function UrlForensicsModule() {
     <div>
       <ModuleHeader
         title="URL Forensics"
-        description="Análisis forense REAL de URLs: DNS lookup, validación SSL, cadena de redirects, heurísticas y Google Safe Browsing. Los resultados se guardan en base de datos."
-        actions={<Button size="sm" onClick={() => toast.info('Bulk submit', { description: 'Próximamente: subir lista CSV de URLs.' })}><ScanLine className="h-3.5 w-3.5 mr-1.5" />Bulk Submit</Button>}
+        description="Análisis REAL de URLs: DNS lookup (Cloudflare DoH), validación SSL con TLS handshake, traza de redirects y heurísticas. Resultados persistidos en tu navegador (localStorage)."
+        actions={<Button size="sm" onClick={() => toast.info('Bulk submit próximamente')}><ScanLine className="h-3.5 w-3.5 mr-1.5" />Bulk Submit</Button>}
       />
 
       <Card className="bg-card/60 mb-6 p-5">
@@ -128,7 +161,7 @@ export function UrlForensicsModule() {
           </Button>
         </div>
         <p className="text-[11px] text-muted-foreground mt-2">
-          El análisis incluye: resolución DNS, validación SSL real (TLS handshake), traza de redirects, heurísticas y Google Safe Browsing si hay API key configurada.
+          El análisis incluye: resolución DNS, validación SSL real (TLS handshake), traza de redirects y heurísticas (TLD sospechoso, IP en hostname, creds embebidas, etc.).
         </p>
       </Card>
 
@@ -137,11 +170,9 @@ export function UrlForensicsModule() {
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
             <div>
               <h3 className="text-sm font-semibold">Análisis realizados</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">{scans.length} en base de datos</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{scans.length} en tu navegador</p>
             </div>
-            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={loadScans} disabled={loading}>
-              {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Refresh'}
-            </Button>
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={load}>Refresh</Button>
           </div>
           <div className="p-2 space-y-1 max-h-[640px] overflow-y-auto dc-scroll">
             {scans.length === 0 && (
@@ -300,32 +331,29 @@ export function UrlForensicsModule() {
                 )}
               </Card>
 
-              {selected.status === 'completed' && selected.detections && (
+              {selected.status === 'completed' && selected.detections.length > 0 && (
                 <SectionCard title="Detecciones" description="Motores de análisis y veredictos reales">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    {(() => {
-                      try {
-                        const d = JSON.parse(selected.detections);
-                        return d.map((det: any, i: number) => (
-                          <div key={i} className="flex items-center justify-between gap-2 p-3 rounded-md border border-border bg-muted/20">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Shield className="h-4 w-4 text-muted-foreground shrink-0" />
-                              <div className="min-w-0">
-                                <div className="text-sm font-medium">{det.engine}</div>
-                                <div className="text-xs text-muted-foreground truncate">{det.verdict}</div>
-                              </div>
-                            </div>
-                            {(det.verdict?.toLowerCase().includes('malicious') ||
-                              det.verdict?.toLowerCase().includes('phishing') ||
-                              det.verdict?.toLowerCase().includes('invalid') ||
-                              det.verdict?.toLowerCase().includes('failed') ||
-                              det.verdict?.toLowerCase().includes('suspicious')) && (
-                              <AlertTriangle className="h-4 w-4 text-red-400 shrink-0" />
-                            )}
+                    {selected.detections.map((det, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 p-3 rounded-md border border-border bg-muted/20">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Shield className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium">{det.engine}</div>
+                            <div className="text-xs text-muted-foreground truncate">{det.verdict}</div>
                           </div>
-                        ));
-                      } catch { return null; }
-                    })()}
+                        </div>
+                        {(det.verdict?.toLowerCase().includes('malicious') ||
+                          det.verdict?.toLowerCase().includes('phishing') ||
+                          det.verdict?.toLowerCase().includes('invalid') ||
+                          det.verdict?.toLowerCase().includes('failed') ||
+                          det.verdict?.toLowerCase().includes('suspicious') ||
+                          det.verdict?.toLowerCase().includes('not https') ||
+                          det.verdict?.toLowerCase().includes('missing')) && (
+                          <AlertTriangle className="h-4 w-4 text-red-400 shrink-0" />
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </SectionCard>
               )}

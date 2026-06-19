@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ModuleHeader, SectionCard } from '@/components/ui-blocks';
-import { authFetch } from '@/lib/store';
+import { ModuleHeader } from '@/components/ui-blocks';
+import { useAppStore } from '@/lib/store';
+import { loadDb, saveDb, genId } from '@/lib/local-db';
 import { classNames } from '@/lib/helpers';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -11,79 +12,69 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Plus, Shield, Smartphone, Globe, ShoppingBag, AtSign, AlertTriangle, Trash2, Loader2, Building2 } from 'lucide-react';
+import { Plus, Shield, Trash2, Loader2, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
-
-interface Brand {
-  id: string;
-  name: string;
-  country: string;
-  type: string;
-  domain: string;
-  status: string;
-  findings: number;
-}
-
-const typeIcon: Record<string, any> = { domain: Globe, appstore: Smartphone, marketplace: ShoppingBag, social: AtSign };
-const statusStyles: Record<string, { label: string; badge: string }> = {
-  active:   { label: 'Active',   badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
-  flagged:  { label: 'Flagged',  badge: 'bg-red-500/15 text-red-400 border-red-500/30' },
-  inactive: { label: 'Inactive', badge: 'bg-slate-500/15 text-slate-400 border-slate-500/30' },
-};
+import type { Brand } from '@/lib/types';
 
 export function BrandProtectionModule() {
+  const user = useAppStore((s) => s.user);
   const [brands, setBrands] = useState<Brand[]>([]);
-  const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ name: '', country: 'Colombia', type: 'Bank', domain: '' });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await authFetch('/api/brands');
-      if (res.ok) setBrands(await res.json());
-    } finally { setLoading(false); }
+  const load = useCallback(() => {
+    const db = loadDb();
+    setBrands(db.brands);
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
-  async function addBrand() {
+  function addBrand() {
     if (!form.name || !form.domain) {
       toast.error('Name y domain son obligatorios');
       return;
     }
-    try {
-      const res = await authFetch('/api/brands', {
-        method: 'POST',
-        body: JSON.stringify(form),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.error || 'Error al agregar marca');
-        return;
-      }
-      toast.success('Marca agregada', { description: `${form.name} (${form.country})` });
-      setForm({ name: '', country: 'Colombia', type: 'Bank', domain: '' });
-      setOpen(false);
-      load();
-    } catch (e: any) {
-      toast.error('Error: ' + e.message);
-    }
+    const newBrand: Brand = {
+      id: genId('br'),
+      name: form.name,
+      country: form.country,
+      type: form.type as any,
+      domain: form.domain,
+      status: 'active',
+      findings: 0,
+    };
+    const db = loadDb();
+    db.brands.push(newBrand);
+    db.activity.unshift({
+      id: genId('a'),
+      type: 'monitor',
+      message: `Marca agregada: ${form.name} (${form.country}, ${form.domain})`,
+      severity: 'info',
+      actor: user?.username || 'system',
+      timestamp: new Date().toISOString(),
+    });
+    saveDb(db);
+    toast.success('Marca agregada', { description: `${form.name} (${form.country})` });
+    setForm({ name: '', country: 'Colombia', type: 'Bank', domain: '' });
+    setOpen(false);
+    load();
   }
 
-  async function deleteBrand(b: Brand) {
-    if (!confirm(`¿Eliminar la marca "${b.name}"? Esta acción es irreversible.`)) return;
-    try {
-      const res = await authFetch(`/api/brands/${b.id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        toast.error('Error al eliminar');
-        return;
-      }
-      toast.success('Marca eliminada', { description: b.name });
-      load();
-    } catch (e: any) {
-      toast.error('Error: ' + e.message);
-    }
+  function deleteBrand(b: Brand) {
+    if (!confirm(`¿Eliminar la marca "${b.name}"?`)) return;
+    const db = loadDb();
+    db.brands = db.brands.filter(x => x.id !== b.id);
+    db.activity.unshift({
+      id: genId('a'),
+      type: 'monitor',
+      message: `Marca eliminada: ${b.name}`,
+      severity: 'info',
+      actor: user?.username || 'system',
+      timestamp: new Date().toISOString(),
+    });
+    saveDb(db);
+    toast.success('Marca eliminada', { description: b.name });
+    load();
   }
 
   const totals = {
@@ -97,16 +88,14 @@ export function BrandProtectionModule() {
     <div>
       <ModuleHeader
         title="Brand Protection"
-        description="Gestión REAL de marcas monitoreadas. Alta/baja persistente en base de datos. Cuando agregás o eliminás una marca, queda guardada entre sesiones."
+        description="CRUD persistente en tu navegador. Cuando agregás o eliminás una marca, queda guardada en localStorage (persiste entre sesiones en este navegador)."
         actions={
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button size="sm"><Plus className="h-3.5 w-3.5 mr-1.5" />Add Brand</Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Agregar marca para monitorear</DialogTitle>
-              </DialogHeader>
+              <DialogHeader><DialogTitle>Agregar marca para monitorear</DialogTitle></DialogHeader>
               <div className="space-y-3 py-2">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Nombre *</Label>
@@ -176,12 +165,10 @@ export function BrandProtectionModule() {
       <Card className="bg-card/60">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" />Marcas en base de datos</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">{brands.length} marcas persistidas en SQLite</p>
+            <h3 className="text-sm font-semibold flex items-center gap-2"><Building2 className="h-4 w-4 text-primary" />Marcas</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">{brands.length} marcas en localStorage</p>
           </div>
-          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={load} disabled={loading}>
-            {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Refresh'}
-          </Button>
+          <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={load}>Refresh</Button>
         </div>
         <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5">
           {brands.length === 0 && (
@@ -190,7 +177,9 @@ export function BrandProtectionModule() {
             </div>
           )}
           {brands.map((b) => {
-            const st = statusStyles[b.status] || statusStyles.active;
+            const st = b.status === 'flagged' ? { label: 'Flagged', badge: 'bg-red-500/15 text-red-400 border-red-500/30' }
+                     : b.status === 'active' ? { label: 'Active', badge: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' }
+                     : { label: 'Inactive', badge: 'bg-slate-500/15 text-slate-400 border-slate-500/30' };
             return (
               <div key={b.id} className="rounded-lg border border-border bg-muted/20 hover:border-primary/40 transition p-3 group">
                 <div className="flex items-start justify-between gap-2">
@@ -201,20 +190,10 @@ export function BrandProtectionModule() {
                   <Badge variant="outline" className={classNames('text-[10px] shrink-0', st.badge)}>{b.status}</Badge>
                 </div>
                 <div className="flex items-center gap-2 mt-2 text-[10px] text-muted-foreground">
-                  <span>{b.country}</span>
-                  <span>·</span>
-                  <span>{b.type}</span>
-                  {b.findings > 0 && (
-                    <>
-                      <span>·</span>
-                      <span className={b.findings >= 5 ? 'text-red-400 font-medium' : 'text-orange-400'}>{b.findings} findings</span>
-                    </>
-                  )}
+                  <span>{b.country}</span><span>·</span><span>{b.type}</span>
+                  {b.findings > 0 && (<><span>·</span><span className={b.findings >= 5 ? 'text-red-400 font-medium' : 'text-orange-400'}>{b.findings} findings</span></>)}
                 </div>
-                <button
-                  onClick={() => deleteBrand(b)}
-                  className="opacity-0 group-hover:opacity-100 transition mt-2 text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1"
-                >
+                <button onClick={() => deleteBrand(b)} className="opacity-0 group-hover:opacity-100 transition mt-2 text-[10px] text-red-400 hover:text-red-300 flex items-center gap-1">
                   <Trash2 className="h-3 w-3" />Eliminar
                 </button>
               </div>

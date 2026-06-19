@@ -11,9 +11,20 @@ interface User {
   avatar: string;
 }
 
+// Usuarios demo (en producción real: backend con bcrypt + JWT)
+const DEMO_ACCOUNTS = {
+  admin: {
+    password: 'admin',
+    user: { username: 'admin', email: 'admin@datacyber.io', role: 'Administrator', avatar: 'AD' },
+  },
+  analyst: {
+    password: 'analyst',
+    user: { username: 'analyst', email: 'analyst@datacyber.io', role: 'Threat Analyst', avatar: 'AN' },
+  },
+};
+
 interface AppState {
   user: User | null;
-  token: string | null;
   isAuthenticated: boolean;
   login: (username: string, password: string) => Promise<{ ok: boolean; error?: string }>;
   logout: () => void;
@@ -30,31 +41,22 @@ interface AppState {
 
 export const useAppStore = create<AppState>()(
   persist(
-    (set, get) => ({
+    (set) => ({
       user: null,
-      token: null,
       isAuthenticated: false,
 
       login: async (username, password) => {
-        try {
-          const res = await fetch('/api/auth', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ username, password }),
-          });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            return { ok: false, error: err.error || 'Login failed' };
-          }
-          const data = await res.json();
-          set({ user: data.user, token: data.token, isAuthenticated: true });
-          return { ok: true };
-        } catch (e: any) {
-          return { ok: false, error: e.message };
+        // Simular latencia de red
+        await new Promise((r) => setTimeout(r, 400));
+        const account = DEMO_ACCOUNTS[username.toLowerCase() as keyof typeof DEMO_ACCOUNTS];
+        if (!account || account.password !== password) {
+          return { ok: false, error: 'Invalid credentials' };
         }
+        set({ user: account.user, isAuthenticated: true });
+        return { ok: true };
       },
 
-      logout: () => set({ user: null, token: null, isAuthenticated: false, activeModule: 'dashboard' }),
+      logout: () => set({ user: null, isAuthenticated: false, activeModule: 'dashboard' }),
 
       activeModule: 'dashboard',
       setModule: (m) => set({ activeModule: m }),
@@ -69,7 +71,6 @@ export const useAppStore = create<AppState>()(
       name: 'datacyber-store',
       partialize: (state) => ({
         user: state.user,
-        token: state.token,
         isAuthenticated: state.isAuthenticated,
         theme: state.theme,
         sidebarCollapsed: state.sidebarCollapsed,
@@ -77,15 +78,3 @@ export const useAppStore = create<AppState>()(
     }
   )
 );
-
-// Helper para llamadas autenticadas
-export async function authFetch(url: string, options: RequestInit = {}) {
-  const token = useAppStore.getState().token;
-  const headers: Record<string, string> = {
-    'content-type': 'application/json',
-    ...(options.headers as Record<string, string> || {}),
-  };
-  if (token) headers.authorization = `Bearer ${token}`;
-  const res = await fetch(url, { ...options, headers });
-  return res;
-}
